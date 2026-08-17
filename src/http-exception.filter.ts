@@ -33,9 +33,9 @@ export class HttpExceptionFilter implements ExceptionFilter {
         exceptionResponse !== null &&
         'message' in exceptionResponse
       ) {
-        message = (exceptionResponse as { message: string | string[] })
-          .message
-          .toString();
+        message = (
+          exceptionResponse as { message: string | string[] }
+        ).message.toString();
       }
     }
 
@@ -46,7 +46,7 @@ export class HttpExceptionFilter implements ExceptionFilter {
 
     response.status(status).json({
       statusCode: status,
-      message,
+      message: exception instanceof Error ? exception.message : undefined,
       path: request.url,
       timestamp: new Date().toISOString(),
     });

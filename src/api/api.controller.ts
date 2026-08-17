@@ -1,39 +1,72 @@
-import { Body, Controller, Get, Query } from '@nestjs/common';
-import { ApiService, AuctionItemResponse } from './api.service';
+import { Controller, Get, Query } from '@nestjs/common';
+import { ApiService } from './api.service';
+import { query } from 'axios';
 
-export interface IQueryParametersStrict {
+export interface IQueryParametersAuction {
   region: string;
   item: string;
-  additional?: string;
-  limit?: number;
-  offset?: number;
-  order?: 'ASC' | 'DESC';
-  sort?: string;
+  additional: string;
+  limit: string;
+  offset: string;
+}
+
+export interface IQueryParametrsCharacter {
+  region: string;
+  username: string;
+}
+
+export interface IQueryParametrsClan {
+  region: string;
+  clanId: string;
+  offset: string;
+  limit: string;
 }
 
 @Controller('api')
 export class ApiController {
   constructor(private readonly apiService: ApiService) {}
 
-  @Get('auction/item')
-  async getAuctionItem(
-    @Query('region') region: string,
-    @Query('item') item: string,
-    @Query('additional') additional?: string,
-    @Query('limit') limit?: string,
-    @Query('offset') offset?: string,
-    @Query('order') order?: string,
-    @Query('sort') sort?: string,
-  ) {
-    const data = await this.apiService.getAuctionItem(region, item);
+  // аукцион
+
+  @Get('auction/lots')
+  async getAuctionItem(@Query() query: IQueryParametersAuction) {
+    const data = await this.apiService.getAuctionItemLots(query);
     return data;
   }
 
   @Get('auction/history')
-  async getAuctionHistory(
-    @Query('region') region: string,
-    @Query('item') item: string,
-    @Query('additional') additional?: string,
-    @Query('limit') limit?: string,
-  ) {}
+  async getAuctionHistory(@Query() query: IQueryParametersAuction) {
+    const data = await this.apiService.getAuctionItemHistory(query);
+    return data;
+  }
+
+  // персонаж
+
+  @Get('character/profile')
+  async getPlayerInfo(@Query() query: IQueryParametrsCharacter) {
+    const data = await this.apiService.getPlayerInfo(query);
+    return data;
+  }
+
+  // кланы
+
+  @Get('clan/list')
+  async getClanList(@Query() query: IQueryParametrsClan) {
+    const data = await this.apiService.getClanList(query);
+    return data;
+  }
+  
+  @Get('clan/info')
+  async getClanInfo(@Query() query: IQueryParametrsClan) {
+    const data = await this.apiService.getClanInformation(query);
+    return data;
+  }
+
+  //выбросы
+
+  @Get('emission')
+  async getEmissionStatus(@Query('region') region: string) {
+    const data = await this.apiService.getEmissionStatus(region);
+    return data;
+  }
 }
