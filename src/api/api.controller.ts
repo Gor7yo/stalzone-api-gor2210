@@ -55,14 +55,14 @@ export class ApiController {
     const data = await this.apiService.getClanList(query);
     return data;
   }
-  
+
   @Get('clan/info')
   async getClanInfo(@Query() query: IQueryParametrsClan) {
     const data = await this.apiService.getClanInformation(query);
     return data;
   }
 
-  //выбросы
+  // выбросы
 
   @Get('emission')
   async getEmissionStatus(@Query('region') region: string) {
