@@ -1,0 +1,45 @@
+// This is your Prisma schema file,
+// learn more about it in the docs: https://pris.ly/d/prisma-schema
+
+// Get a free hosted Postgres database in seconds: `npx create-db`
+
+generator client {
+  provider = "prisma-client"
+  moduleFormat = "cjs"
+  output   = "../generated/prisma"
+}
+
+datasource db {
+  provider = "postgresql"
+}
+
+model User {
+  id String @id @default(uuid())
+
+  stalzoneId Int    @unique
+  uuid       String @unique
+  login      String @unique
+
+  steamId String? @map("steam_id")
+
+  distributor    String?
+  distributor_id String?
+
+  createdAt       DateTime         @default(now())
+  updatedAt       DateTime         @updatedAt
+  stalzoneAccount StalzoneAccount?
+
+  @@map("users")
+}
+
+model StalzoneAccount {
+  id     String @id @default(uuid())
+  userId String @unique
+
+  accessToken  String
+  refreshToken String
+  expiresAt    Int
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+  @@map("stalzone_accounts")
+}
