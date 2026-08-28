@@ -4,9 +4,9 @@
 // Get a free hosted Postgres database in seconds: `npx create-db`
 
 generator client {
-  provider = "prisma-client"
+  provider     = "prisma-client"
   moduleFormat = "cjs"
-  output   = "../generated/prisma"
+  output       = "../generated/prisma"
 }
 
 datasource db {
@@ -41,5 +41,16 @@ model StalzoneAccount {
   expiresAt    Int
 
   user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
   @@map("stalzone_accounts")
+}
+
+model Clan {
+  id     String @id
+  region String
+  name   String
+  tag    String
+  leader String
+
+  @@map("clans")
 }

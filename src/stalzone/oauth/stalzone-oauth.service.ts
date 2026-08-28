@@ -27,7 +27,7 @@ export class StalzoneOAuthService {
     private readonly prisma: PrismaService,
   ) {}
 
-  private accessToken?: string;
+  public accessToken?: string;
   private expiresAt: number = 0;
   private token_type?: string;
 

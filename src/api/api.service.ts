@@ -8,28 +8,16 @@ import {
   IQueryParametrsClan,
 } from './api.controller';
 import { StalzoneOAuthService } from 'src/stalzone/oauth/stalzone-oauth.service';
+import { PrismaService } from 'src/prisma/prisma.service';
+import {
+  AuctionItemHistoryResponse,
+  AuctionItemLotsResponse,
+  IClanInfo,
+  IClansList,
+  IRegionData,
+} from './api.constants';
 
-export interface AuctionItemLotsResponse {
-  total: number;
-  lots: {
-    itemId: string;
-    amount: number;
-    startPrice: number;
-    buyoutPrice: number;
-    startTime: number;
-    endTime: string;
-    additional?: { [key: string]: any };
-  }[];
-}
-export interface AuctionItemHistoryResponse {
-  total: number;
-  prices: {
-    amount: string;
-    price: number;
-    time: number;
-    additional?: { [key: string]: any };
-  }[];
-}
+type ClanRegions = 'ru' | 'eu' | 'na';
 
 @Injectable()
 export class ApiService {
@@ -37,9 +25,12 @@ export class ApiService {
     private readonly oAuthService: StalzoneOAuthService,
     private readonly configService: ConfigService,
     private readonly httpService: HttpService,
+    private readonly prisma: PrismaService,
   ) {}
 
   private access_token: string = '';
+  private lastGetClansInfoTime: string = '';
+  private lastClanListData: IRegionData = {};
 
   private async getToken() {
     const token = await this.oAuthService.getApplicationToken();
@@ -51,6 +42,7 @@ export class ApiService {
   }
 
   async getAuctionItemLots(query: IQueryParametersAuction) {
+    // return { total: 60 };
     const apiUrl = this.configService.getOrThrow<string>('STALZONE_API_URL');
 
     const { data } = await firstValueFrom(
@@ -63,6 +55,7 @@ export class ApiService {
           params: {
             additional: query.additional ?? 'false',
             limit: query.limit ?? '20',
+            offset: query.offset ?? '20',
           },
         },
       ),
@@ -129,8 +122,69 @@ export class ApiService {
 
   async getClanList(query: IQueryParametrsClan) {
     const apiUrl = this.configService.getOrThrow<string>('STALZONE_API_URL');
+    const splitedRegions: string[] = query.region.split(',');
 
-    const { data } = await firstValueFrom(
+    console.log(splitedRegions);
+    console.log(JSON.stringify(query))
+    let resultData: IRegionData = {};
+
+    if (splitedRegions.length > 1) {
+      for (const region of splitedRegions) {
+        const { data: curData } = await firstValueFrom(
+          this.httpService.get<IClansList>(`${apiUrl}/${region}/clans`, {
+            headers: {
+              Authorization: `Bearer ${await this.getToken()}`,
+            },
+            params: {
+              limit: query.limit ?? '20',
+              offset: query.offset ?? '20',
+            },
+          }),
+        );
+
+        for (const clan of curData.data) clan.region = region;
+        resultData[region] = curData;
+
+        // if (!curData.data || curData.data.length === 0) continue;
+
+        // const values = curData.data.map((clan) => ({
+        //   id: clan.id,
+        //   name: clan.name,
+        //   region: region,
+        //   tag: clan.tag,
+        //   leader: clan.leader,
+        // }));
+
+        // await this.prisma.$transaction(
+        //   values.map((clan) =>
+        //     this.prisma.clan.upsert({
+        //       where: { id: clan.id },
+        //       update: {
+        //         name: clan.name,
+        //         region: clan.region,
+        //         tag: clan.tag,
+        //         leader: clan.leader,
+        //       },
+        //       create: {
+        //         id: clan.id,
+        //         name: clan.name,
+        //         region: clan.region,
+        //         tag: clan.tag,
+        //         leader: clan.leader,
+        //       },
+        //     }),
+        //   ),
+        // );
+      }
+
+      this.lastClanListData = resultData;
+
+      return resultData;
+    }
+
+    this.lastGetClansInfoTime = Date.now().toLocaleString('ru-RU');
+
+    const { data: curData } = await firstValueFrom(
       this.httpService.get(`${apiUrl}/${query.region}/clans`, {
         headers: {
           Authorization: `Bearer ${await this.getToken()}`,
@@ -142,7 +196,9 @@ export class ApiService {
       }),
     );
 
-    return data;
+    resultData[query.region] = curData;
+
+    return resultData;
   }
 
   async getEmissionStatus(region: string) {

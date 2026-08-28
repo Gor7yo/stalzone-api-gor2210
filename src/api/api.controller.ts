@@ -1,6 +1,5 @@
 import { Controller, Get, Query } from '@nestjs/common';
 import { ApiService } from './api.service';
-import { query } from 'axios';
 
 export interface IQueryParametersAuction {
   region: string;
