@@ -9,7 +9,7 @@ const lot = (
   amount,
   startPrice: 1,
   buyoutPrice,
-  startTime: 1_700_000_000 + buyoutPrice,
+  startTime: String(1_700_000_000 + buyoutPrice),
   endTime: '',
   additional,
 });
@@ -95,7 +95,7 @@ describe('decide', () => {
       lastLotKey: lotKey(old),
       lastNotifiedAt: new Date(now - 60_000),
     });
-    const same = { ...lot(4_000_000), startTime: 1 };
+    const same = { ...lot(4_000_000), startTime: '1' };
     expect(decide([same], a, now)).toEqual({ action: 'none' });
     expect(decide([same], a, now + RENOTIFY_MS)).toMatchObject({
       action: 'notify',

@@ -16,6 +16,8 @@ import {
   AlertIdParam,
   CreatePriceAlertDto,
   EmissionToggleDto,
+  FlipAlertDto,
+  RegionParam,
 } from './dto/alerts.dto';
 import { TelegramAuthGuard, type TelegramRequest } from './telegram-auth.guard';
 
@@ -40,6 +42,18 @@ export class AlertsController {
   @HttpCode(204)
   deletePrice(@Req() req: TelegramRequest, @Param() { id }: AlertIdParam) {
     return this.alerts.deletePrice(req.tgUser.id, id);
+  }
+
+  /** Включить или поменять флип-алерт региона. */
+  @Put('flip')
+  setFlip(@Req() req: TelegramRequest, @Body() dto: FlipAlertDto) {
+    return this.alerts.setFlip(req.tgUser, dto);
+  }
+
+  @Delete('flip/:region')
+  @HttpCode(204)
+  deleteFlip(@Req() req: TelegramRequest, @Param() { region }: RegionParam) {
+    return this.alerts.deleteFlip(req.tgUser.id, region);
   }
 
   @Put('emission')

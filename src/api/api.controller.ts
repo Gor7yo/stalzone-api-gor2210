@@ -25,7 +25,7 @@ export class ApiController {
   ) {}
 
   @Get('auction/lots')
-  // коротко: в приложении есть кнопка «Обновить» (перезарядка 3 с)
+  // коротко: в приложении есть кнопка «Обновить» (перезарядка 5 с после ответа)
   @Header('Cache-Control', 'public, max-age=3')
   getAuctionLots(@Query() query: AuctionQueryDto) {
     return this.apiService.getAuctionItemLots(query);

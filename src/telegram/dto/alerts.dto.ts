@@ -70,6 +70,50 @@ export class CreatePriceAlertDto {
   maxPrice!: number;
 }
 
+/** Флип-алерт: условия — те же фильтры, что в ленте флиппера. */
+export class FlipAlertDto {
+  @IsIn(REGIONS, { message: `region: одно из ${REGIONS.join(', ')}` })
+  region!: Region;
+
+  /** Прибыль после комиссии не меньше, ₽ */
+  @Type(() => Number)
+  @IsInt()
+  @Min(10_000)
+  @Max(2_000_000_000)
+  minProfit!: number;
+
+  @IsOptional()
+  @Type(() => Number)
+  @IsInt()
+  @Min(0)
+  @Max(1000)
+  minPct?: number;
+
+  @IsOptional()
+  @IsIn(['low', 'medium', 'high'])
+  minConfidence?: 'low' | 'medium' | 'high';
+
+  /** Выкуп не дороже; 0 — любой */
+  @IsOptional()
+  @Type(() => Number)
+  @IsInt()
+  @Min(0)
+  @Max(2_000_000_000)
+  maxBudget?: number;
+
+  /** Категории предметов (artefact, weapon…); пусто — любые */
+  @IsOptional()
+  @IsArray()
+  @ArrayMaxSize(12)
+  @Matches(/^[a-z_]{1,32}$/, { each: true })
+  groups?: string[];
+}
+
+export class RegionParam {
+  @IsIn(REGIONS, { message: `region: одно из ${REGIONS.join(', ')}` })
+  region!: Region;
+}
+
 export class EmissionToggleDto {
   @IsIn(REGIONS, { message: `region: одно из ${REGIONS.join(', ')}` })
   region!: Region;

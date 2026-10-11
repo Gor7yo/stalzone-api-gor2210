@@ -3,7 +3,9 @@ import { ConfigModule } from '@nestjs/config';
 import { APP_GUARD } from '@nestjs/core';
 import { ThrottlerGuard, ThrottlerModule } from '@nestjs/throttler';
 import { ApiModule } from './api/api.module';
+import { CollectorModule } from './collector/collector.module';
 import { validateEnv } from './config/validation';
+import { FlipperModule } from './flipper/flipper.module';
 import { PrismaModule } from './prisma/prisma.module';
 import { StalzoneModule } from './stalzone/stalzone.module';
 import { TelegramModule } from './telegram/telegram.module';
@@ -16,7 +18,9 @@ import { TelegramModule } from './telegram/telegram.module';
     ThrottlerModule.forRoot([{ name: 'default', ttl: 60_000, limit: 300 }]),
     PrismaModule,
     StalzoneModule,
+    CollectorModule,
     ApiModule,
+    FlipperModule,
     TelegramModule,
   ],
   providers: [{ provide: APP_GUARD, useClass: ThrottlerGuard }],

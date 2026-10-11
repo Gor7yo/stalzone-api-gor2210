@@ -76,6 +76,7 @@ export class BotCommandsService implements OnModuleInit {
       [
         '<b>Сталкер, я пришлю уведомление, когда:</b>',
         '🔔 предмет на аукционе стал дешевле твоего порога — включается кнопкой 🔔 на странице предмета в приложении;',
+        '💰 появился выгодный флип — включается во «Флиппере» в приложении;',
         '☢️ начался выброс — /emission',
         '',
         'Список алертов — /alerts, отключить всё — /stop',
@@ -100,9 +101,12 @@ export class BotCommandsService implements OnModuleInit {
   }
 
   private async list(chatId: number) {
-    const { emission, price } = await this.alerts.overview(chatId);
+    const { emission, price, flip } = await this.alerts.overview(chatId);
     const lines = [
       `☢️ Выброс: ${emission.length ? emission.map((r) => REGION_LABEL[r]).join(', ') : 'выкл.'}`,
+      flip.length
+        ? `💰 Флипы: ${flip.map((f) => `${REGION_LABEL[f.region as Region] ?? f.region} от ${formatShort(f.minProfit)}`).join(', ')}`
+        : '💰 Флипы: выкл. (включаются во флиппере в приложении)',
       '',
       price.length
         ? '<b>Алерты цен:</b>'
@@ -112,9 +116,17 @@ export class BotCommandsService implements OnModuleInit {
           `${i + 1}. ${escapeHtml(alertTitle(a))} · ${REGION_LABEL[a.region as Region] ?? a.region} — до ${formatShort(a.maxPrice)}`,
       ),
     ];
-    const buttons: InlineButton[][] = price.map((a, i) => [
-      { text: `Удалить ${i + 1}`, callback_data: `del:${a.id}` },
-    ]);
+    const buttons: InlineButton[][] = [
+      ...price.map((a, i) => [
+        { text: `Удалить ${i + 1}`, callback_data: `del:${a.id}` },
+      ]),
+      ...flip.map((f) => [
+        {
+          text: `Отключить флипы ${REGION_LABEL[f.region as Region] ?? f.region}`,
+          callback_data: `fdel:${f.region}`,
+        },
+      ]),
+    ];
     await this.bot.send(chatId, lines.join('\n'), buttons);
   }
 
@@ -173,6 +185,14 @@ export class BotCommandsService implements OnModuleInit {
           })
           .catch(() => {});
       }
+    } else if (
+      action === 'fdel' &&
+      (REGIONS as readonly string[]).includes(arg)
+    ) {
+      notice = await this.alerts
+        .deleteFlip(q.from.id, arg)
+        .then(() => 'Флип-алерт отключён')
+        .catch(() => 'Уже отключён');
     } else if (action === 'del' && arg) {
       notice = await this.alerts
         .deletePrice(q.from.id, arg)

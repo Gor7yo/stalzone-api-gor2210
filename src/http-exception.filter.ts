@@ -26,9 +26,14 @@ export class HttpExceptionFilter implements ExceptionFilter {
         ? exception.getStatus()
         : HttpStatus.INTERNAL_SERVER_ERROR;
     let message: string | string[] = 'Внутренняя ошибка сервера';
+    /** машинный код ошибки (например pro_required) — фронтенд по нему решает, что показать */
+    let code: string | undefined;
 
     if (exception instanceof HttpException && status < 500) {
       const body = exception.getResponse();
+      if (typeof body === 'object' && body !== null && 'code' in body) {
+        code = String(body.code);
+      }
       message =
         typeof body === 'string'
           ? body
@@ -55,6 +60,7 @@ export class HttpExceptionFilter implements ExceptionFilter {
 
     response.status(status).json({
       statusCode: status,
+      ...(code && { code }),
       message,
       path,
       timestamp: new Date().toISOString(),

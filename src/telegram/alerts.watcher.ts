@@ -7,6 +7,9 @@ import {
 import { ConfigService } from '@nestjs/config';
 import type { AuctionItemLotsResponse } from 'src/api/api.constants';
 import type { Region } from 'src/api/dto/queries.dto';
+import { AuctionStore } from 'src/collector/auction-store.service';
+import { CollectorService } from 'src/collector/collector.service';
+import { type Confidence, FlipperService } from 'src/flipper/flipper.service';
 import { PrismaService } from 'src/prisma/prisma.service';
 import { StalcraftApiClient } from 'src/stalzone/api/stalcraft-api.client';
 import {
@@ -17,11 +20,20 @@ import {
   formatShort,
   REGION_LABEL,
 } from './format';
+import { MAX_SENT_KEYS } from './alerts.service';
+import { flipMessage, pickNewFlips } from './flip-notify';
 import { decide, unitPrice } from './price-match';
+import { isProActive, PRICE_ALERT_LIMIT } from './pro.service';
 import { InlineButton, TelegramBotService } from './telegram-bot.service';
 
 const EMISSION_EVERY_MS = 30_000;
 const PRICES_EVERY_MS = 60_000;
+/** Лента флиппера пересчитывается раз в минуту — чаще проверять нет смысла. */
+const FLIPS_EVERY_MS = 60_000;
+/** Не чаще одного сообщения о флипах на человека за столько (остальное придёт следующим). */
+const FLIP_MESSAGE_GAP_MS = 5 * 60_000;
+/** Снимок лотов старше этого — сначала обновляем (сборщик снимает предметы с алертами раз в минуту). */
+const LOTS_MAX_AGE_MS = 90_000;
 /** О выбросе, начавшемся раньше, не сообщаем (например, сервер только что запустился). */
 const EMISSION_FRESH_MS = 10 * 60_000;
 /** Пауза между сообщениями при рассылке — лимит Telegram ~30 сообщений/с. */
@@ -34,9 +46,9 @@ interface EmissionResponse {
 }
 
 /**
- * Фоновые проверки: раз в 30 с — выброс, раз в минуту — цены на аукционе.
- * Запросы к STALCRAFT идут через общий клиент с кешем, поэтому одинаковые
- * запросы мини-приложения и проверок не удваиваются.
+ * Фоновые проверки: раз в 30 с — выброс, раз в минуту — цены на аукционе и флипы.
+ * Цены берутся из снимков лотов сборщика в БД (общих с сайтом), выброс — через
+ * общий клиент STALCRAFT с кешем.
  */
 @Injectable()
 export class AlertsWatcher implements OnApplicationBootstrap, OnModuleDestroy {
@@ -48,6 +60,9 @@ export class AlertsWatcher implements OnApplicationBootstrap, OnModuleDestroy {
   constructor(
     private readonly prisma: PrismaService,
     private readonly stalcraft: StalcraftApiClient,
+    private readonly store: AuctionStore,
+    private readonly collector: CollectorService,
+    private readonly flipper: FlipperService,
     private readonly bot: TelegramBotService,
     config: ConfigService,
   ) {
@@ -58,6 +73,7 @@ export class AlertsWatcher implements OnApplicationBootstrap, OnModuleDestroy {
     if (!this.bot.enabled || process.env.NODE_ENV === 'test') return;
     this.every('emission', EMISSION_EVERY_MS, () => this.checkEmission());
     this.every('prices', PRICES_EVERY_MS, () => this.checkPrices());
+    this.every('flips', FLIPS_EVERY_MS, () => this.checkFlips());
   }
 
   onModuleDestroy() {
@@ -124,19 +140,98 @@ export class AlertsWatcher implements OnApplicationBootstrap, OnModuleDestroy {
     }
   }
 
+  // ---------- флипы ----------
+
+  async checkFlips() {
+    // флип-алерты — функция Pro: у кого подписка кончилась, алерт молча ждёт продления
+    const alerts = await this.prisma.flipAlert.findMany({
+      where: { subscriber: { blocked: false, proUntil: { gt: new Date() } } },
+    });
+    const regions = [...new Set(alerts.map((a) => a.region))];
+    const feeds = new Map(
+      await Promise.all(
+        regions.map(
+          async (r) =>
+            [r, await this.flipper.feed(r).catch(() => null)] as const,
+        ),
+      ),
+    );
+
+    for (const alert of alerts) {
+      const feed = feeds.get(alert.region);
+      if (!feed) continue;
+      if (
+        alert.lastNotifiedAt &&
+        Date.now() - alert.lastNotifiedAt.getTime() < FLIP_MESSAGE_GAP_MS
+      ) {
+        continue;
+      }
+      const { keys, offers } = pickNewFlips(
+        feed.flips,
+        {
+          minProfit: alert.minProfit,
+          minPct: alert.minPct,
+          minConfidence: alert.minConfidence as Confidence,
+          maxBudget: alert.maxBudget,
+          groups: alert.groups,
+        },
+        new Set(alert.sentKeys),
+      );
+      if (!offers.length) continue;
+
+      const link = deepLink(this.appUrl, '/flips');
+      const sent = await this.bot.send(
+        alert.chatId,
+        flipMessage(alert.region as Region, offers),
+        [
+          [
+            ...(link ? [{ text: 'Открыть флиппер', url: link }] : []),
+            { text: 'Отключить', callback_data: `fdel:${alert.region}` },
+          ],
+        ],
+      );
+      if (sent) {
+        await this.prisma.flipAlert.updateMany({
+          where: { id: alert.id },
+          data: {
+            sentKeys: [...keys, ...alert.sentKeys].slice(0, MAX_SENT_KEYS),
+            lastNotifiedAt: new Date(),
+          },
+        });
+      }
+      await sleep(SEND_GAP_MS);
+    }
+  }
+
   // ---------- цены ----------
 
   async checkPrices() {
-    const alerts = await this.prisma.priceAlert.findMany({
+    const all = await this.prisma.priceAlert.findMany({
       where: { subscriber: { blocked: false } },
+      orderBy: { createdAt: 'asc' },
+      include: { subscriber: { select: { proUntil: true } } },
+    });
+    // без Pro работает только первый алерт (остальные остались с прошлой подписки)
+    const perChat = new Map<bigint, number>();
+    const alerts = all.filter((a) => {
+      const n = (perChat.get(a.chatId) ?? 0) + 1;
+      perChat.set(a.chatId, n);
+      return isProActive(a.subscriber.proUntil) || n <= PRICE_ALERT_LIMIT.free;
     });
 
-    // один запрос лотов на пару «регион + предмет», сколько бы алертов на неё ни было
+    // один снимок лотов на пару «регион + предмет», сколько бы алертов на неё ни было
     const groups = new Map<string, typeof alerts>();
     for (const alert of alerts) {
       const key = `${alert.region}:${alert.itemId}`;
       groups.set(key, [...(groups.get(key) ?? []), alert]);
     }
+    // сборщик держит лоты этих предметов свежими (раз в минуту)
+    this.collector.setAlertItems(
+      [...groups.values()].map(([a]) => ({
+        region: a.region,
+        itemId: a.itemId,
+      })),
+    );
 
     for (const group of groups.values()) {
       const { region, itemId } = group[0];
@@ -194,13 +289,22 @@ export class AlertsWatcher implements OnApplicationBootstrap, OnModuleDestroy {
 
   /**
    * Лоты по возрастанию цены выкупа, пока она не превысит порог.
-   * Лоты без выкупа (0) EXBO ставит в начало, а нужное качество может быть
-   * глубже первых 200 лотов — поэтому листаем страницы (не больше 5).
+   * Первые 200 — из снимка сборщика в БД. Лоты без выкупа (0) EXBO ставит в начало,
+   * а нужное качество может быть глубже первых 200 лотов — поэтому, если снимок
+   * неполный и порог выше его последнего лота, дочитываем страницы EXBO (всего не больше 5).
    */
   private async lotsUpTo(region: string, itemId: string, ceiling: number) {
     const PAGE = 200;
     const lots: AuctionItemLotsResponse['lots'] = [];
-    for (let page = 0; page < 5; page++) {
+    let first = 0;
+    const snap = await this.store.cheapestLots(region, itemId, LOTS_MAX_AGE_MS);
+    if (snap) {
+      lots.push(...snap.lots);
+      const last = snap.lots.at(-1);
+      if (snap.complete || !last || last.buyoutPrice > ceiling) return lots;
+      first = 1;
+    }
+    for (let page = first; page < 5; page++) {
       const res = await this.stalcraft.get<AuctionItemLotsResponse>(
         [region, 'auction', itemId, 'lots'],
         {

@@ -61,6 +61,19 @@ export class AuctionQueryDto extends PageQuery {
   @IsOptional()
   @IsIn(['asc', 'desc'])
   order?: 'asc' | 'desc';
+
+  /** true — пользователь нажал «Обновить»: снимок не старше нескольких секунд */
+  @IsOptional()
+  @IsBooleanString()
+  fresh?: string;
+
+  /** Насколько старый снимок лотов годится, с (цены в списках); по умолчанию — минута */
+  @IsOptional()
+  @Type(() => Number)
+  @IsInt()
+  @Min(5)
+  @Max(3600)
+  maxAge?: number;
 }
 
 export const HISTORY_PERIODS = ['day', 'week', 'month', 'year'] as const;
@@ -75,6 +88,11 @@ export class HistoryPeriodQueryDto extends RegionQuery {
     message: `period: одно из ${HISTORY_PERIODS.join(', ')}`,
   })
   period!: HistoryPeriod;
+
+  /** true — пользователь нажал «Обновить» */
+  @IsOptional()
+  @IsBooleanString()
+  fresh?: string;
 }
 
 export class CharacterQueryDto extends RegionQuery {

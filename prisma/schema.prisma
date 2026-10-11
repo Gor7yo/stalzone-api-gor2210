@@ -67,10 +67,13 @@ model TelegramSubscriber {
   emissionRegions String[] @default([])
   /// Пользователь заблокировал бота — не шлём, пока снова не нажмёт /start
   blocked Boolean @default(false)
+  /// Pro действует до этого момента; null или в прошлом — бесплатная версия
+  proUntil DateTime?
 
   createdAt   DateTime     @default(now())
   updatedAt   DateTime     @updatedAt
   priceAlerts PriceAlert[]
+  flipAlerts  FlipAlert[]
   webSessions WebSession[]
 
   @@map("telegram_subscribers")
@@ -107,6 +110,34 @@ model PriceAlert {
   @@map("price_alerts")
 }
 
+/// Флип-алерт: сообщать о новых выгодных лотах из ленты флиппера. Один на человека и регион.
+model FlipAlert {
+  id     String @id @default(uuid())
+  chatId BigInt
+  region String
+
+  /// Прибыль после комиссии не меньше (₽, весь лот)
+  minProfit     Int
+  /// И не меньше стольких % от выкупа
+  minPct        Int    @default(10)
+  /// low | medium | high — минимальная надёжность оценки
+  minConfidence String @default("medium")
+  /// Выкуп лота не дороже; 0 — любой
+  maxBudget     Int    @default(0)
+  /// Категории предметов (artefact, weapon, armor…); пусто — любые
+  groups        String[] @default([])
+
+  /// Ключи лотов, о которых уже сообщили (последние ~300) — не повторяемся
+  sentKeys       String[]  @default([])
+  lastNotifiedAt DateTime?
+  createdAt      DateTime  @default(now())
+
+  subscriber TelegramSubscriber @relation(fields: [chatId], references: [chatId], onDelete: Cascade)
+
+  @@unique([chatId, region])
+  @@map("flip_alerts")
+}
+
 /// Небольшое key-value хранилище состояния фоновых задач (например, последний выброс, о котором уже сообщили).
 model AppState {
   key       String   @id
@@ -141,4 +172,83 @@ model WebSession {
 
   @@index([chatId])
   @@map("web_sessions")
+}
+
+// ---------- собственные данные аукциона (сборщик) ----------
+
+/// Сделка на аукционе. Продажи не меняются — сборщик только дописывает новые.
+model AuctionSale {
+  id       BigInt   @id @default(autoincrement())
+  region   String
+  itemId   String
+  time     DateTime
+  /// Цена всей сделки (за amount штук)
+  price    BigInt
+  amount   Int
+  /// Качество 0–5; -1 — у предмета нет качества (не null: в уникальном ключе Postgres NULL ≠ NULL)
+  quality  Int      @default(-1)
+  /// Заточка 0–15 (+0, если в лоте поля не было)
+  upgrade  Int      @default(0)
+
+  /// Одинаковые сделки в одну секунду считаем одной: у EXBO нет id сделки
+  @@unique([region, itemId, time, price, amount, quality, upgrade], name: "sale_identity")
+  @@index([region, itemId, time(sort: Desc)])
+  @@map("auction_sales")
+}
+
+/// Лот на аукционе: снимок обновляется сборщиком; goneAt — когда лот пропал (купили или истёк).
+model AuctionLot {
+  id           BigInt    @id @default(autoincrement())
+  region       String
+  itemId       String
+  startTime    DateTime
+  endTime      DateTime
+  amount       Int
+  startPrice   BigInt
+  currentPrice BigInt?
+  buyoutPrice  BigInt
+  /// -1 — без качества (см. AuctionSale.quality)
+  quality      Int       @default(-1)
+  upgrade      Int       @default(0)
+  firstSeenAt  DateTime  @default(now())
+  lastSeenAt   DateTime  @default(now())
+  goneAt       DateTime?
+
+  /// У EXBO нет id лота — узнаём его по моменту выставления и параметрам
+  @@unique([region, itemId, startTime, amount, startPrice, buyoutPrice, quality, upgrade], name: "lot_identity")
+  @@index([region, itemId, goneAt])
+  @@map("auction_lots")
+}
+
+/// Предмет, который сборщик держит свежим. Частота зависит от ликвидности и интереса пользователей.
+model TrackedItem {
+  region   String
+  itemId   String
+  /// seed — стартовый список, view — открывали на сайте, alert — стоит алерт
+  source   String   @default("seed")
+
+  /// Продаж в сутки (по накопленной истории) — от этого зависит частота
+  salesPerDay Float  @default(0)
+  /// Когда пользователь последний раз открывал предмет / пользовался алертом
+  wantedAt    DateTime?
+
+  nextLotsAt  DateTime @default(now())
+  nextSalesAt DateTime @default(now())
+  lastLotsAt  DateTime?
+  lastSalesAt DateTime?
+  /// Смещение догрузки старой истории (страницами по 200); null — догружено
+  backfillOffset Int?   @default(0)
+  /// С какого момента история продаж в БД полная (epoch — вся история EXBO); null — ещё догружается
+  historyFrom DateTime?
+  /// Сколько лотов было на аукционе при последнем снимке (в снимке — не больше 200 самых дешёвых)
+  lotsTotal   Int?
+  failures    Int      @default(0)
+  lastError   String?
+
+  createdAt DateTime @default(now())
+
+  @@id([region, itemId])
+  @@index([nextLotsAt])
+  @@index([nextSalesAt])
+  @@map("tracked_items")
 }

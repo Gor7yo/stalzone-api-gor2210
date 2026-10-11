@@ -1,4 +1,6 @@
 import { Injectable } from '@nestjs/common';
+import { AuctionStore } from 'src/collector/auction-store.service';
+import { CollectorService } from 'src/collector/collector.service';
 import { StalcraftApiClient } from 'src/stalzone/api/stalcraft-api.client';
 import {
   AuctionItemHistoryResponse,
@@ -23,11 +25,48 @@ export const TTL = {
   emission: 10_000,
 } as const;
 
+/** Насколько старый снимок лотов из БД отдаём: открытый предмет / после «Обновить». */
+const LOTS_MAX_AGE = { view: 60_000, fresh: 10_000 } as const;
+
 @Injectable()
 export class ApiService {
-  constructor(private readonly stalcraft: StalcraftApiClient) {}
+  constructor(
+    private readonly stalcraft: StalcraftApiClient,
+    private readonly collector: CollectorService,
+    private readonly store: AuctionStore,
+  ) {}
 
-  getAuctionItemLots(q: AuctionQueryDto) {
+  /**
+   * Лоты из снимка сборщика в БД; EXBO напрямую — только если БД ответить не может
+   * (сортировка глубже 200 самых дешёвых на большом рынке, сборщик выключен).
+   */
+  async getAuctionItemLots(q: AuctionQueryDto) {
+    // maxAge передают списки цен: такой предмет только добавляем в сборщик;
+    // открытый предмет сборщик держит свежим чаще (ответ не ждёт записи)
+    const list = q.maxAge !== undefined;
+    void this.collector.touch(q.region, q.item, list ? 'list' : 'view');
+    const maxAgeMs =
+      q.fresh === 'true'
+        ? LOTS_MAX_AGE.fresh
+        : list
+          ? q.maxAge! * 1000
+          : LOTS_MAX_AGE.view;
+    const stored = await this.store
+      .lots(
+        {
+          region: q.region,
+          item: q.item,
+          sort: q.sort,
+          order: q.order,
+          limit: q.limit ?? 20,
+          offset: q.offset ?? 0,
+          additional: q.additional === 'true',
+        },
+        maxAgeMs,
+      )
+      .catch(() => null);
+    if (stored) return stored;
+
     return this.stalcraft.get<AuctionItemLotsResponse>(
       [q.region, 'auction', q.item, 'lots'],
       {

@@ -6,8 +6,11 @@ export interface AuctionItemLotsResponse {
     itemId: string;
     amount: number;
     startPrice: number;
+    /** Текущая ставка (нет, если ставок не было) */
+    currentPrice?: number;
     buyoutPrice: number;
-    startTime: number;
+    /** ISO-время, «2026-10-11T17:24:37Z» */
+    startTime: string;
     endTime: string;
     additional?: { [key: string]: any };
   }[];
@@ -15,9 +18,10 @@ export interface AuctionItemLotsResponse {
 export interface AuctionItemHistoryResponse {
   total: number;
   prices: {
-    amount: string;
+    amount: number;
     price: number;
-    time: number;
+    /** ISO-время */
+    time: string;
     additional?: { [key: string]: any };
   }[];
 }
