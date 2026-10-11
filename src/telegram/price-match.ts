@@ -3,8 +3,14 @@ import type { AuctionItemLotsResponse } from 'src/api/api.constants';
 type Lot = AuctionItemLotsResponse['lots'][number];
 
 export interface AlertCriteria {
+  /** Одно качество (старые алерты) */
   quality: number | null;
+  /** Набор качеств; если не пуст — главнее quality */
+  qualities?: number[];
+  /** Один уровень заточки (старые алерты) */
   upgrade: number | null;
+  /** Набор уровней заточки; если не пуст — главнее upgrade */
+  upgrades?: number[];
   maxPrice: number;
   lastLotKey: string | null;
   lastNotifiedAt: Date | null;
@@ -33,8 +39,14 @@ export function cheapestMatching(lots: Lot[], alert: AlertCriteria) {
   for (const lot of lots) {
     const price = unitPrice(lot);
     if (!price) continue;
-    if (alert.quality !== null && qualityOf(lot) !== alert.quality) continue;
-    if (alert.upgrade !== null && upgradeOf(lot) !== alert.upgrade) continue;
+    const q = qualityOf(lot);
+    if (alert.qualities?.length) {
+      if (q === null || !alert.qualities.includes(q)) continue;
+    } else if (alert.quality !== null && q !== alert.quality) continue;
+    const u = upgradeOf(lot);
+    if (alert.upgrades?.length) {
+      if (!alert.upgrades.includes(u)) continue;
+    } else if (alert.upgrade !== null && u !== alert.upgrade) continue;
     if (!best || price < unitPrice(best)) best = lot;
   }
   return best;

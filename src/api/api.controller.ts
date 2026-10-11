@@ -8,7 +8,9 @@ import {
   ClanInfoQueryDto,
   ClanListQueryDto,
   EmissionQueryDto,
+  HistoryPeriodQueryDto,
 } from './dto/queries.dto';
+import { HistoryPeriodService } from './history-period.service';
 
 /**
  * Cache-Control подсказывает браузеру/CDN, сколько можно не перезапрашивать ответ.
@@ -19,10 +21,12 @@ export class ApiController {
   constructor(
     private readonly apiService: ApiService,
     private readonly stalcraft: StalcraftApiClient,
+    private readonly historyPeriod: HistoryPeriodService,
   ) {}
 
   @Get('auction/lots')
-  @Header('Cache-Control', 'public, max-age=15')
+  // коротко: в приложении есть кнопка «Обновить» (перезарядка 3 с)
+  @Header('Cache-Control', 'public, max-age=3')
   getAuctionLots(@Query() query: AuctionQueryDto) {
     return this.apiService.getAuctionItemLots(query);
   }
@@ -31,6 +35,13 @@ export class ApiController {
   @Header('Cache-Control', 'public, max-age=60')
   getAuctionHistory(@Query() query: AuctionQueryDto) {
     return this.apiService.getAuctionItemHistory(query);
+  }
+
+  /** История за день/неделю/месяц/год одним ответом (сервер сам листает страницы EXBO). */
+  @Get('auction/history/period')
+  @Header('Cache-Control', 'public, max-age=60')
+  getAuctionHistoryPeriod(@Query() query: HistoryPeriodQueryDto) {
+    return this.historyPeriod.get(query);
   }
 
   @Get('character/profile')

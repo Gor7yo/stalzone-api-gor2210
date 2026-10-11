@@ -84,10 +84,14 @@ model PriceAlert {
   itemId   String
   itemName String
 
-  /// Качество артефакта 0–5 (null — любое)
-  quality Int?
-  /// Точная заточка 0–15 (null — любая)
-  upgrade Int?
+  /// Одно качество артефакта 0–5 (старые алерты; null — любое)
+  quality   Int?
+  /// Выбранные качества: [2, 3] = Особый или Редкий; пусто — смотрим на quality
+  qualities Int[] @default([])
+  /// Один уровень заточки 0–15 (старые алерты; null — любая)
+  upgrade  Int?
+  /// Выбранные уровни заточки: [1, 5] или [5, 6, 7…]; пусто — смотрим на upgrade
+  upgrades Int[] @default([])
   /// Порог цены за штуку
   maxPrice Int
 

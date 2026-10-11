@@ -31,6 +31,30 @@ describe('decide', () => {
     lot(0, { qlt: 5, ptn: 10 }), // без выкупа
   ];
 
+  it('набор уровней заточки: [1, 10] ловит +10, [1, 5] — нет', () => {
+    expect(
+      decide(lots, alert({ quality: 5, upgrades: [1, 10] })),
+    ).toMatchObject({ action: 'notify', lot: { buyoutPrice: 4_500_000 } });
+    expect(decide(lots, alert({ quality: 5, upgrades: [1, 5] }))).toEqual({
+      action: 'none',
+    });
+  });
+
+  it('набор качеств: [0, 5] +10 ловит Легендарный +10, [1, 2] — нет', () => {
+    expect(
+      decide(lots, alert({ qualities: [0, 5], upgrades: [10] })),
+    ).toMatchObject({ action: 'notify', lot: { buyoutPrice: 4_500_000 } });
+    expect(decide(lots, alert({ qualities: [1, 2] }))).toEqual({
+      action: 'none',
+    });
+  });
+
+  it('набор уровней главнее старого поля upgrade', () => {
+    expect(
+      decide(lots, alert({ quality: 5, upgrade: 3, upgrades: [10] })),
+    ).toMatchObject({ action: 'notify' });
+  });
+
   it('находит самый дешёвый лот нужного качества и заточки', () => {
     const r = decide(lots, alert({ quality: 5, upgrade: 10 }));
     expect(r).toMatchObject({

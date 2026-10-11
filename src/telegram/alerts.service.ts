@@ -23,7 +23,9 @@ const publicAlert = {
   itemId: true,
   itemName: true,
   quality: true,
+  qualities: true,
   upgrade: true,
+  upgrades: true,
   maxPrice: true,
   lastNotifiedAt: true,
   createdAt: true,
@@ -79,14 +81,21 @@ export class AlertsService {
         `Не больше ${MAX_PRICE_ALERTS} алертов — удалите ненужные`,
       );
     }
+    // наборы без повторов и по порядку — так их удобно показывать («Особый, Редкий +1, +5…+7»)
+    const uniq = (list?: number[]) =>
+      [...new Set(list ?? [])].sort((a, b) => a - b);
+    const upgrades = uniq(dto.upgrades);
+    const qualities = uniq(dto.qualities);
     return this.prisma.priceAlert.create({
       data: {
         chatId,
         region: dto.region,
         itemId: dto.itemId,
         itemName: dto.itemName.trim(),
-        quality: dto.quality ?? null,
-        upgrade: dto.upgrade ?? null,
+        quality: qualities.length ? null : (dto.quality ?? null),
+        qualities,
+        upgrade: upgrades.length ? null : (dto.upgrade ?? null),
+        upgrades,
         maxPrice: dto.maxPrice,
       },
       select: publicAlert,

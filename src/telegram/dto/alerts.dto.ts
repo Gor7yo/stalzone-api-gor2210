@@ -1,5 +1,7 @@
 import { Transform, Type } from 'class-transformer';
 import {
+  ArrayMaxSize,
+  IsArray,
   IsBoolean,
   IsIn,
   IsInt,
@@ -41,6 +43,24 @@ export class CreatePriceAlertDto {
   @Min(0)
   @Max(15)
   upgrade?: number;
+
+  /** Набор качеств: [2, 3] — Особый или Редкий */
+  @IsOptional()
+  @IsArray()
+  @ArrayMaxSize(6)
+  @IsInt({ each: true })
+  @Min(0, { each: true })
+  @Max(5, { each: true })
+  qualities?: number[];
+
+  /** Набор уровней заточки: [1, 5], [5, 6, 7, 8] */
+  @IsOptional()
+  @IsArray()
+  @ArrayMaxSize(16)
+  @IsInt({ each: true })
+  @Min(0, { each: true })
+  @Max(15, { each: true })
+  upgrades?: number[];
 
   /** Порог цены за штуку */
   @Type(() => Number)

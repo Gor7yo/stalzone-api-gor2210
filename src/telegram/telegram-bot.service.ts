@@ -177,6 +177,7 @@ export class TelegramBotService
 
   private async pollLoop() {
     let offset = 0;
+    let failures = 0;
     this.logger.log('Бот запущен (long polling)');
     while (!this.stopped) {
       try {
@@ -189,6 +190,8 @@ export class TelegramBotService
           },
           35_000,
         );
+        if (failures >= 3) this.logger.log('Связь с Telegram восстановлена');
+        failures = 0;
         for (const update of updates) {
           offset = update.update_id + 1;
           await this.handler?.(update).catch((e: Error) =>
@@ -210,8 +213,15 @@ export class TelegramBotService
           this.logger.error('TELEGRAM_BOT_TOKEN неверный (401)');
           return;
         }
-        this.logger.warn(`getUpdates: ${String(error)}`);
-        await sleep(5000);
+        // одиночный обрыв/таймаут long polling'а — норма (сеть, Telegram): молча переподключаемся.
+        // Предупреждаем один раз, только если связи нет несколько попыток подряд.
+        failures++;
+        if (failures === 3) {
+          this.logger.warn(
+            `Нет связи с api.telegram.org (${String(error)}) — продолжаю попытки`,
+          );
+        }
+        await sleep(Math.min(1000 * 2 ** (failures - 1), 30_000));
       }
     }
   }

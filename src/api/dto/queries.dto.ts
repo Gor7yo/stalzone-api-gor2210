@@ -63,6 +63,20 @@ export class AuctionQueryDto extends PageQuery {
   order?: 'asc' | 'desc';
 }
 
+export const HISTORY_PERIODS = ['day', 'week', 'month', 'year'] as const;
+export type HistoryPeriod = (typeof HISTORY_PERIODS)[number];
+
+/** История продаж за период: сервер сам листает страницы EXBO и отдаёт одним ответом. */
+export class HistoryPeriodQueryDto extends RegionQuery {
+  @Matches(/^[a-z0-9]{1,16}$/, { message: 'item: некорректный ID предмета' })
+  item!: string;
+
+  @IsIn(HISTORY_PERIODS, {
+    message: `period: одно из ${HISTORY_PERIODS.join(', ')}`,
+  })
+  period!: HistoryPeriod;
+}
+
 export class CharacterQueryDto extends RegionQuery {
   @Matches(/^[\p{L}\p{N}_.-]{1,32}$/u, {
     message: 'username: некорректный ник',

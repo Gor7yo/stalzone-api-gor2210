@@ -34,18 +34,40 @@ export function formatShort(value: number) {
 export const escapeHtml = (s: string) =>
   s.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
 
-/** «Комета · Легендарный +10» */
+/** Уровни заточки подряд сворачиваем: [1, 3, 4, 5] → «+1, +3…+5» (как во фронтенде). */
+export function upgradesLabel(levels: number[]) {
+  const runs: [number, number][] = [];
+  for (const l of [...levels].sort((a, b) => a - b)) {
+    const last = runs[runs.length - 1];
+    if (last && l === last[1] + 1) last[1] = l;
+    else runs.push([l, l]);
+  }
+  return runs.map(([a, b]) => (a === b ? `+${a}` : `+${a}…+${b}`)).join(', ');
+}
+
+/** «Комета · Легендарный +10», «Комета · Особый, Редкий +1, +5…+7» */
 export function alertTitle(a: {
   itemName: string;
   quality: number | null;
+  qualities?: number[];
   upgrade: number | null;
+  upgrades?: number[];
 }) {
-  const variant = [
-    a.quality !== null ? QUALITY_LABEL[a.quality] : null,
-    a.upgrade !== null ? `+${a.upgrade}` : null,
-  ]
-    .filter(Boolean)
-    .join(' ');
+  const qualities = a.qualities?.length
+    ? a.qualities
+    : a.quality !== null
+      ? [a.quality]
+      : [];
+  const quality = qualities.length
+    ? qualities.map((q) => QUALITY_LABEL[q]).join(', ')
+    : null;
+  const levels = a.upgrades?.length
+    ? a.upgrades
+    : a.upgrade !== null
+      ? [a.upgrade]
+      : [];
+  const upgrade = levels.length ? upgradesLabel(levels) : null;
+  const variant = [quality, upgrade].filter(Boolean).join(' ');
   return variant ? `${a.itemName} · ${variant}` : a.itemName;
 }
 
