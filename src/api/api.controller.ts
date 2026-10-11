@@ -7,6 +7,8 @@ export interface IQueryParametersAuction {
   additional: string;
   limit: string;
   offset: string;
+  sort?: 'time_created' | 'time_left' | 'current_price' | 'buyout_price';
+  order?: 'asc' | 'desc';
 }
 
 export interface IQueryParametrsCharacter {

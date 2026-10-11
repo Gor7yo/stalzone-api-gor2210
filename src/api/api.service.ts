@@ -55,7 +55,9 @@ export class ApiService {
           params: {
             additional: query.additional ?? 'false',
             limit: query.limit ?? '20',
-            offset: query.offset ?? '20',
+            offset: query.offset ?? '0',
+            ...(query.sort ? { sort: query.sort } : {}),
+            ...(query.order ? { order: query.order } : {}),
           },
         },
       ),
@@ -77,7 +79,7 @@ export class ApiService {
           params: {
             additional: query.additional ?? 'false',
             limit: query.limit ?? '20',
-            offset: query.offset ?? '20',
+            offset: query.offset ?? '0',
           },
         },
       ),
@@ -137,7 +139,7 @@ export class ApiService {
             },
             params: {
               limit: query.limit ?? '20',
-              offset: query.offset ?? '20',
+              offset: query.offset ?? '0',
             },
           }),
         );
@@ -191,7 +193,7 @@ export class ApiService {
         },
         params: {
           limit: query.limit ?? '20',
-          offset: query.offset ?? '20',
+          offset: query.offset ?? '0',
         },
       }),
     );
