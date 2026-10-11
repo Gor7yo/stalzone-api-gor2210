@@ -54,3 +54,87 @@ model Clan {
 
   @@map("clans")
 }
+
+// ---------- алерты в Telegram-боте ----------
+
+/// Пользователь Telegram, который запустил бота или включил алерт в мини-приложении.
+model TelegramSubscriber {
+  chatId    BigInt  @id
+  firstName String?
+  username  String?
+
+  /// Регионы, о выбросах в которых присылать уведомление
+  emissionRegions String[] @default([])
+  /// Пользователь заблокировал бота — не шлём, пока снова не нажмёт /start
+  blocked Boolean @default(false)
+
+  createdAt   DateTime     @default(now())
+  updatedAt   DateTime     @updatedAt
+  priceAlerts PriceAlert[]
+  webSessions WebSession[]
+
+  @@map("telegram_subscribers")
+}
+
+/// «Сообщи, когда <предмет> на <регион> будет дешевле <maxPrice> за штуку».
+model PriceAlert {
+  id       String @id @default(uuid())
+  chatId   BigInt
+  region   String
+  itemId   String
+  itemName String
+
+  /// Качество артефакта 0–5 (null — любое)
+  quality Int?
+  /// Точная заточка 0–15 (null — любая)
+  upgrade Int?
+  /// Порог цены за штуку
+  maxPrice Int
+
+  /// Последний лот, о котором уже сообщили — чтобы не слать одно и то же каждую минуту
+  lastLotKey     String?
+  lastNotifiedAt DateTime?
+  createdAt      DateTime  @default(now())
+
+  subscriber TelegramSubscriber @relation(fields: [chatId], references: [chatId], onDelete: Cascade)
+
+  @@index([region, itemId])
+  @@index([chatId])
+  @@map("price_alerts")
+}
+
+/// Небольшое key-value хранилище состояния фоновых задач (например, последний выброс, о котором уже сообщили).
+model AppState {
+  key       String   @id
+  value     String
+  updatedAt DateTime @updatedAt
+
+  @@map("app_state")
+}
+
+/// Одноразовый код привязки сайта к Telegram: сайт создаёт → бот подтверждает → сайт забирает сессию.
+model TelegramLinkCode {
+  /// sha256 от кода — сам код знает только браузер и ссылка t.me/<бот>?start=link_<код>
+  codeHash  String    @id
+  /// Заполняется, когда пользователь подтвердил привязку в боте
+  chatId    BigInt?
+  expiresAt DateTime
+  createdAt DateTime  @default(now())
+
+  @@map("telegram_link_codes")
+}
+
+/// Сессия сайта в браузере, привязанная к чату Telegram (для алертов вне мини-приложения).
+model WebSession {
+  id         String   @id @default(uuid())
+  /// sha256 от токена; сам токен хранится только в браузере
+  tokenHash  String   @unique
+  chatId     BigInt
+  createdAt  DateTime @default(now())
+  lastUsedAt DateTime @default(now())
+
+  subscriber TelegramSubscriber @relation(fields: [chatId], references: [chatId], onDelete: Cascade)
+
+  @@index([chatId])
+  @@map("web_sessions")
+}

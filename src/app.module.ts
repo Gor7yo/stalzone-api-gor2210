@@ -6,6 +6,7 @@ import { ApiModule } from './api/api.module';
 import { validateEnv } from './config/validation';
 import { PrismaModule } from './prisma/prisma.module';
 import { StalzoneModule } from './stalzone/stalzone.module';
+import { TelegramModule } from './telegram/telegram.module';
 
 @Module({
   imports: [
@@ -16,6 +17,7 @@ import { StalzoneModule } from './stalzone/stalzone.module';
     PrismaModule,
     StalzoneModule,
     ApiModule,
+    TelegramModule,
   ],
   providers: [{ provide: APP_GUARD, useClass: ThrottlerGuard }],
 })

@@ -39,6 +39,17 @@ export function validateEnv(config: Record<string, unknown>) {
     );
   }
 
+  const bot = str(config.TELEGRAM_BOT_TOKEN).trim();
+  if (bot && !/^\d+:[\w-]{30,}$/.test(bot)) {
+    throw new Error('TELEGRAM_BOT_TOKEN не похож на токен от @BotFather');
+  }
+  const appUrl = str(config.TELEGRAM_APP_URL).trim();
+  if (appUrl && !/^https:\/\/t\.me\/\w+\/\w+$/.test(appUrl)) {
+    throw new Error(
+      `TELEGRAM_APP_URL должен выглядеть как https://t.me/<бот>/<приложение> (сейчас: ${appUrl})`,
+    );
+  }
+
   return { ...config, PORT: port };
 }
 
