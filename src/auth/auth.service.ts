@@ -26,8 +26,12 @@ export class AuthService {
 
     // TODO: регистрация по логину/паролю не доделана — по схеме пользователь
     // создаётся только через Stalzone OAuth (нужны stalzoneId и uuid).
-    throw new NotImplementedException('Регистрация по логину пока не поддерживается');
+    throw new NotImplementedException(
+      'Регистрация по логину пока не поддерживается',
+    );
   }
 
-  async loginUser(body: { login: string; password: string }) {}
+  loginUser(): never {
+    throw new NotImplementedException('Вход по логину пока не поддерживается');
+  }
 }

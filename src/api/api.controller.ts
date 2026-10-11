@@ -1,73 +1,71 @@
-import { Controller, Get, Query } from '@nestjs/common';
+import { Controller, Get, Header, Query } from '@nestjs/common';
+import { SkipThrottle } from '@nestjs/throttler';
+import { StalcraftApiClient } from 'src/stalzone/api/stalcraft-api.client';
 import { ApiService } from './api.service';
+import {
+  AuctionQueryDto,
+  CharacterQueryDto,
+  ClanInfoQueryDto,
+  ClanListQueryDto,
+  EmissionQueryDto,
+} from './dto/queries.dto';
 
-export interface IQueryParametersAuction {
-  region: string;
-  item: string;
-  additional: string;
-  limit: string;
-  offset: string;
-  sort?: 'time_created' | 'time_left' | 'current_price' | 'buyout_price';
-  order?: 'asc' | 'desc';
-}
-
-export interface IQueryParametrsCharacter {
-  region: string;
-  username: string;
-}
-
-export interface IQueryParametrsClan {
-  region: string;
-  clanId: string;
-  offset: string;
-  limit: string;
-}
-
+/**
+ * Cache-Control подсказывает браузеру/CDN, сколько можно не перезапрашивать ответ.
+ * Значения чуть меньше серверного кеша (TTL в api.service.ts).
+ */
 @Controller('api')
 export class ApiController {
-  constructor(private readonly apiService: ApiService) {}
-
-  // аукцион
+  constructor(
+    private readonly apiService: ApiService,
+    private readonly stalcraft: StalcraftApiClient,
+  ) {}
 
   @Get('auction/lots')
-  async getAuctionItem(@Query() query: IQueryParametersAuction) {
-    const data = await this.apiService.getAuctionItemLots(query);
-    return data;
+  @Header('Cache-Control', 'public, max-age=15')
+  getAuctionLots(@Query() query: AuctionQueryDto) {
+    return this.apiService.getAuctionItemLots(query);
   }
 
   @Get('auction/history')
-  async getAuctionHistory(@Query() query: IQueryParametersAuction) {
-    const data = await this.apiService.getAuctionItemHistory(query);
-    return data;
+  @Header('Cache-Control', 'public, max-age=60')
+  getAuctionHistory(@Query() query: AuctionQueryDto) {
+    return this.apiService.getAuctionItemHistory(query);
   }
-
-  // персонаж
 
   @Get('character/profile')
-  async getPlayerInfo(@Query() query: IQueryParametrsCharacter) {
-    const data = await this.apiService.getPlayerInfo(query);
-    return data;
+  @Header('Cache-Control', 'public, max-age=60')
+  getPlayerInfo(@Query() query: CharacterQueryDto) {
+    return this.apiService.getPlayerInfo(query);
   }
 
-  // кланы
-
   @Get('clan/list')
-  async getClanList(@Query() query: IQueryParametrsClan) {
-    const data = await this.apiService.getClanList(query);
-    return data;
+  @Header('Cache-Control', 'public, max-age=300')
+  getClanList(@Query() query: ClanListQueryDto) {
+    return this.apiService.getClanList(query);
   }
 
   @Get('clan/info')
-  async getClanInfo(@Query() query: IQueryParametrsClan) {
-    const data = await this.apiService.getClanInformation(query);
-    return data;
+  @Header('Cache-Control', 'public, max-age=300')
+  getClanInfo(@Query() query: ClanInfoQueryDto) {
+    return this.apiService.getClanInformation(query);
   }
 
-  // выбросы
-
   @Get('emission')
-  async getEmissionStatus(@Query('region') region: string) {
-    const data = await this.apiService.getEmissionStatus(region);
-    return data;
+  @Header('Cache-Control', 'public, max-age=5')
+  getEmissionStatus(@Query() query: EmissionQueryDto) {
+    return this.apiService.getEmissionStatus(query);
+  }
+
+  /** Для мониторинга/деплоя: жив ли сервер. */
+  @Get('health')
+  @SkipThrottle()
+  @Header('Cache-Control', 'no-store')
+  health() {
+    return {
+      status: 'ok',
+      uptime: Math.round(process.uptime()),
+      cacheEntries: this.stalcraft.cacheSize,
+    };
   }
 }

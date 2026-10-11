@@ -1,21 +1,53 @@
+import { Logger, ValidationPipe } from '@nestjs/common';
+import { ConfigService } from '@nestjs/config';
 import { NestFactory } from '@nestjs/core';
-import { AppModule } from './app.module';
+import { NestExpressApplication } from '@nestjs/platform-express';
+import compression from 'compression';
 import cookieParser from 'cookie-parser';
-import { ValidationPipe } from '@nestjs/common';
+import helmet from 'helmet';
+import { AppModule } from './app.module';
+import { corsOrigins } from './config/validation';
 import { HttpExceptionFilter } from './http-exception.filter';
 
 async function bootstrap() {
-  const app = await NestFactory.create(AppModule, {
-    cors: {
-      credentials: true,
-      origin: ['http://localhost:3000'],
-    },
+  const app = await NestFactory.create<NestExpressApplication>(AppModule);
+  const config = app.get(ConfigService);
+
+  // за nginx/Cloudflare: настоящий IP клиента для лимита запросов
+  if (config.get('TRUST_PROXY'))
+    app.set('trust proxy', Number(config.get('TRUST_PROXY')) || 1);
+  app.disable('x-powered-by');
+
+  app.use(
+    helmet({
+      // API отдаёт JSON другому origin'у (фронтенду) — разрешаем кросс-доменное чтение
+      crossOriginResourcePolicy: { policy: 'cross-origin' },
+    }),
+  );
+  // ответ с 200 лотами — сотни КБ JSON; gzip сжимает его в 8–10 раз
+  app.use(compression({ threshold: 1024 }));
+  app.use(cookieParser());
+
+  app.enableCors({
+    origin: corsOrigins(config.get<string>('CORS_PATHS')),
+    credentials: true,
+    methods: ['GET', 'POST', 'OPTIONS'],
+    maxAge: 86_400,
   });
 
-  app.use(cookieParser());
   app.useGlobalFilters(new HttpExceptionFilter());
+  app.useGlobalPipes(
+    new ValidationPipe({
+      whitelist: true,
+      forbidNonWhitelisted: true,
+      transform: true,
+      stopAtFirstError: true,
+    }),
+  );
+  app.enableShutdownHooks();
 
-  app.useGlobalPipes(new ValidationPipe());
-  await app.listen(process.env.PORT ?? 3001);
+  const port = config.get<number>('PORT') ?? 3001;
+  await app.listen(port);
+  Logger.log(`API запущен на :${port}`, 'Bootstrap');
 }
-bootstrap();
+void bootstrap();

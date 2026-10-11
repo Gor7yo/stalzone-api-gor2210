@@ -1,16 +1,11 @@
 import { Module } from '@nestjs/common';
-import { ApiService } from './api.service';
+import { StalzoneModule } from 'src/stalzone/stalzone.module';
 import { ApiController } from './api.controller';
-import { HttpModule } from '@nestjs/axios';
-import { ConfigModule, ConfigService } from '@nestjs/config';
-import { StalzoneOAuthService } from 'src/stalzone/oauth/stalzone-oauth.service';
-import { PrismaModule } from 'src/prisma/prisma.module';
-import { PrismaService } from 'src/prisma/prisma.service';
+import { ApiService } from './api.service';
 
 @Module({
-  imports: [HttpModule, ConfigModule, PrismaModule],
+  imports: [StalzoneModule],
   controllers: [ApiController],
-  providers: [ApiService, ConfigService, StalzoneOAuthService, PrismaService],
-  exports: [ApiService],
+  providers: [ApiService],
 })
 export class ApiModule {}

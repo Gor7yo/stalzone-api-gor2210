@@ -1,75 +1,57 @@
-import { BadRequestException, Injectable } from '@nestjs/common';
+import { Injectable } from '@nestjs/common';
+import { TokenCipher } from 'src/common/crypto/token-cipher';
 import { PrismaService } from 'src/prisma/prisma.service';
 import { StalzoneUser } from 'src/stalzone/oauth/stalzone-oauth.service';
 
-interface TokenCredentals {
+interface TokenCredentials {
   accessToken: string;
   refreshToken: string;
+  /** срок жизни access-токена в секундах (как отдаёт EXBO) */
   expiresIn: number;
 }
 
+/** Поля пользователя, которые безопасно отдавать наружу. */
+const PUBLIC_USER = {
+  id: true,
+  uuid: true,
+  login: true,
+  stalzoneId: true,
+} as const;
+
 @Injectable()
 export class UsersService {
-  constructor(private readonly prisma: PrismaService) {}
+  constructor(
+    private readonly prisma: PrismaService,
+    private readonly cipher: TokenCipher,
+  ) {}
 
-  async findByStalzoneId(id: string) {
-    return await this.prisma.user.findFirst({
-      where: {
-        uuid: id,
-      },
-      select: {
-        id: true,
-        uuid: true,
-        login: true,
-        distributor_id: true,
-      },
+  /** Создаёт пользователя при первом входе или обновляет логин/дистрибьютора при повторном. */
+  upsertFromStalzone(user: StalzoneUser) {
+    const data = {
+      uuid: user.uuid,
+      login: user.login,
+      distributor: user.distributor,
+      distributor_id: user.distributor_id,
+    };
+    return this.prisma.user.upsert({
+      where: { stalzoneId: user.id },
+      create: { ...data, stalzoneId: user.id },
+      update: data,
+      select: PUBLIC_USER,
     });
   }
 
-  async create(user: StalzoneUser) {
-    const userDb = await this.prisma.user.findUnique({
-      where: {
-        stalzoneId: user.id,
-      },
-      select: {
-        id: true,
-        login: true,
-        uuid: true,
-        stalzoneId: true,
-      },
-    });
-
-    if (!userDb) {
-      return this.prisma.user.create({
-        data: {
-          uuid: user.uuid,
-          distributor: user.distributor,
-          distributor_id: user.distributor_id,
-          login: user.login,
-          stalzoneId: user.id,
-        },
-      });
-    }
-
-    throw new BadRequestException('Такой пользователь уже есть!');
-  }
-
-  async saveStalzoneTokens(userId: string, tokens: TokenCredentals) {
+  async saveStalzoneTokens(userId: string, tokens: TokenCredentials) {
+    const data = {
+      accessToken: this.cipher.encrypt(tokens.accessToken),
+      refreshToken: this.cipher.encrypt(tokens.refreshToken),
+      // храним момент истечения (unix-секунды), а не длительность
+      expiresAt: Math.floor(Date.now() / 1000) + Number(tokens.expiresIn || 0),
+    };
     await this.prisma.stalzoneAccount.upsert({
-      where: {
-        userId,
-      },
-      create: {
-        userId,
-        accessToken: tokens.accessToken,
-        refreshToken: tokens.refreshToken,
-        expiresAt: tokens.expiresIn,
-      },
-      update: {
-        accessToken: tokens.accessToken,
-        refreshToken: tokens.refreshToken,
-        expiresAt: tokens.expiresIn,
-      },
+      where: { userId },
+      create: { userId, ...data },
+      update: data,
     });
   }
 }
