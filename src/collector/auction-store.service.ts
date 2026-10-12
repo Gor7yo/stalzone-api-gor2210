@@ -6,7 +6,7 @@ import type {
 import type { LOT_SORTS } from 'src/api/dto/queries.dto';
 import { PrismaService } from 'src/prisma/prisma.service';
 import type { AuctionLot, TrackedItem } from 'generated/prisma/client';
-import { CollectorService, PAGE } from './collector.service';
+import { CollectorService, MAX_LOT_PAGES, PAGE } from './collector.service';
 
 type Lot = AuctionItemLotsResponse['lots'][number];
 type Sale = AuctionItemHistoryResponse['prices'][number];
@@ -91,8 +91,8 @@ export class AuctionStore {
       },
       orderBy: [{ buyoutPrice: 'asc' }, { startTime: 'asc' }],
     });
-    // в снимке все лоты аукциона или только 200 самых дешёвых
-    const complete = (item.lotsTotal ?? 0) <= PAGE;
+    // в снимке все лоты аукциона или только самые дешёвые (если лотов больше MAX_LOT_PAGES страниц)
+    const complete = (item.lotsTotal ?? 0) <= MAX_LOT_PAGES * PAGE;
     return {
       lots,
       complete,

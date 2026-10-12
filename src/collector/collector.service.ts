@@ -22,6 +22,8 @@ import { SEED_ITEMS } from './seed-items';
 const MIN = 60_000;
 const DAY = 24 * 60 * MIN;
 export const PAGE = 200;
+/** Снимок лотов — до стольких страниц: больше 1000 лотов на одном предмете не бывает на практике. */
+export const MAX_LOT_PAGES = 5;
 /** Как далеко назад догружаем историю для нового предмета. */
 const BACKFILL_DAYS = 30;
 /** Предмет «нужен», пока его открывали или трогали алерт не дольше этого. */
@@ -545,22 +547,36 @@ export class CollectorService
 
   /**
    * Снимок лотов: новые записываем, увиденные продлеваем, пропавшие помечаем goneAt.
-   * Берём 200 самых дешёвых по выкупу — флипперу и «лучшей цене» важны именно они.
+   * Берём все лоты по возрастанию выкупа, страницами по 200 (до MAX_LOT_PAGES).
    * Лоты последнего снимка — те, у кого lastSeenAt = lastLotsAt предмета.
    */
   private async collectLots(item: TrackedItem, priority: Priority) {
-    const res = await this.stalcraft.get<AuctionItemLotsResponse>(
-      [item.region, 'auction', item.itemId, 'lots'],
-      {
-        additional: 'true',
-        limit: PAGE,
-        offset: 0,
-        sort: 'buyout_price',
-        order: 'asc',
-      },
-      0,
-      priority,
-    );
+    const page = (offset: number) =>
+      this.stalcraft.get<AuctionItemLotsResponse>(
+        [item.region, 'auction', item.itemId, 'lots'],
+        {
+          additional: 'true',
+          limit: PAGE,
+          offset,
+          sort: 'buyout_price',
+          order: 'asc',
+        },
+        0,
+        priority,
+      );
+    // все страницы (до MAX_LOT_PAGES): дорогие лоты — редкие и легендарные артефакты —
+    // лежат после 200 самых дешёвых, а без них не работают фильтр качества и флиппер
+    const first = await page(0);
+    const res = { total: first.total, lots: [...first.lots] };
+    for (
+      let offset = PAGE;
+      offset < Math.min(first.total, MAX_LOT_PAGES * PAGE);
+      offset += PAGE
+    ) {
+      const next = await page(offset);
+      res.lots.push(...next.lots);
+      if (next.lots.length < PAGE) break;
+    }
     this.stats.lotsJobs++;
     const now = new Date();
     const key = (l: {
@@ -603,15 +619,21 @@ export class CollectorService
       },
     });
     const activeByKey = new Map(active.map((a) => [key(a), a]));
-    const seenKeys = new Set(seen.map(key));
+    // между запросами страниц лоты сдвигаются — один и тот же мог попасть дважды
+    const seenKeys = new Set<string>();
+    for (let i = seen.length - 1; i >= 0; i--) {
+      const k = key(seen[i]);
+      if (seenKeys.has(k)) seen.splice(i, 1);
+      else seenKeys.add(k);
+    }
 
     const fresh = seen
       .filter((l) => !activeByKey.has(key(l)))
       .map((l) => ({ ...l, firstSeenAt: now, lastSeenAt: now }));
     const stillThere = active.filter((a) => seenKeys.has(key(a)));
-    // пропавшим считаем только лот, который точно попал бы в эту страницу:
-    // снимок полный (лотов ≤ 200) или лот дешевле самого дорогого из полученных
-    const complete = res.total <= PAGE;
+    // пропавшим считаем только лот, который точно попал бы в снимок:
+    // снимок полный (сняты все страницы) или лот дешевле самого дорогого из полученных
+    const complete = res.total <= MAX_LOT_PAGES * PAGE;
     const maxBuyout = seen.reduce(
       (m, l) => (l.buyoutPrice > m ? l.buyoutPrice : m),
       0n,
