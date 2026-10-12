@@ -47,7 +47,14 @@ export class TributeController {
       throw new UnauthorizedException('bad signature');
     }
 
-    const hook = JSON.parse(req.rawBody.toString('utf8')) as TributeWebhook;
+    const hook = JSON.parse(req.rawBody.toString('utf8')) as TributeWebhook & {
+      test_event?: unknown;
+    };
+    // кнопка «тестовый вебхук» в Tribute: {"test_event":"test_event"}
+    if (hook.test_event) {
+      this.logger.log('Tribute: тестовый вебхук получен, подпись верна');
+      return { ok: true };
+    }
     const action = tributeAction(hook, {
       productId: this.config.get<string>('TRIBUTE_PRODUCT_ID') || undefined,
       subscriptionId:
