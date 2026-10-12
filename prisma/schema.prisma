@@ -58,6 +58,20 @@ model Clan {
 // ---------- алерты в Telegram-боте ----------
 
 /// Пользователь Telegram, который запустил бота или включил алерт в мини-приложении.
+/// Обработанные платежи Tribute — вебхук повторяется, Pro выдаём один раз
+model ProPayment {
+  /// "product:<purchase_id>" или "sub:<subscription_id>:<expires_at>"
+  id        String   @id
+  chatId    BigInt
+  event     String
+  amount    Int?
+  currency  String?
+  createdAt DateTime @default(now())
+
+  @@index([chatId])
+  @@map("pro_payments")
+}
+
 model TelegramSubscriber {
   chatId    BigInt  @id
   firstName String?
@@ -69,6 +83,8 @@ model TelegramSubscriber {
   blocked Boolean @default(false)
   /// Pro действует до этого момента; null или в прошлом — бесплатная версия
   proUntil DateTime?
+  /// Когда взят пробный Pro (один раз на Telegram); null — ещё не брал
+  trialUsedAt DateTime?
 
   createdAt   DateTime     @default(now())
   updatedAt   DateTime     @updatedAt

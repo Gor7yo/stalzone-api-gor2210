@@ -44,6 +44,13 @@ export class MeController {
   me(@Req() req: TelegramRequest) {
     return this.pro.status(req.tgUser.id);
   }
+
+  /** Взять пробный Pro (один раз). Отдаёт новый статус. */
+  @Post('trial')
+  @Header('Cache-Control', 'no-store')
+  trial(@Req() req: TelegramRequest) {
+    return this.pro.startTrial(req.tgUser.id);
+  }
 }
 
 /** Лента флиппера — только для Pro. */

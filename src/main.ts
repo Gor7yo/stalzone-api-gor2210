@@ -10,7 +10,10 @@ import { corsOrigins } from './config/validation';
 import { HttpExceptionFilter } from './http-exception.filter';
 
 async function bootstrap() {
-  const app = await NestFactory.create<NestExpressApplication>(AppModule);
+  const app = await NestFactory.create<NestExpressApplication>(AppModule, {
+    // req.rawBody — для проверки подписи вебхука Tribute
+    rawBody: true,
+  });
   const config = app.get(ConfigService);
 
   // за nginx/Cloudflare: настоящий IP клиента для лимита запросов

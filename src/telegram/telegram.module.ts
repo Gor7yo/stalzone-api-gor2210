@@ -14,6 +14,7 @@ import {
 import { ProService } from './pro.service';
 import { TelegramAuthGuard } from './telegram-auth.guard';
 import { TelegramBotService } from './telegram-bot.service';
+import { TributeController } from './tribute.controller';
 import { WebLinkController } from './web-link.controller';
 import { WebLinkService } from './web-link.service';
 
@@ -30,6 +31,7 @@ import { WebLinkService } from './web-link.service';
     MeController,
     FlipsController,
     ProAdminController,
+    TributeController,
   ],
   providers: [
     TelegramBotService,
