@@ -6,6 +6,7 @@ import {
   UnauthorizedException,
 } from '@nestjs/common';
 import type { Request } from 'express';
+import { AccessService } from './access.service';
 import type { SubscriberInfo } from './alerts.service';
 import { verifyInitData } from './init-data';
 import { TelegramBotService } from './telegram-bot.service';
@@ -23,6 +24,7 @@ export class TelegramAuthGuard implements CanActivate {
   constructor(
     private readonly bot: TelegramBotService,
     private readonly webLink: WebLinkService,
+    private readonly access: AccessService,
   ) {}
 
   async canActivate(context: ExecutionContext) {
@@ -36,6 +38,7 @@ export class TelegramAuthGuard implements CanActivate {
     if (scheme === 'Bearer' && value) user = await this.webLink.resolve(value);
     if (!user) throw new UnauthorizedException('Привяжите Telegram');
 
+    await this.access.check(user);
     req.tgUser = user;
     return true;
   }

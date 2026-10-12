@@ -2,6 +2,9 @@ import { Module } from '@nestjs/common';
 import { CollectorModule } from 'src/collector/collector.module';
 import { FlipperModule } from 'src/flipper/flipper.module';
 import { StalzoneModule } from 'src/stalzone/stalzone.module';
+import { AccessService } from './access.service';
+import { AdminController, AdminGuard } from './admin.controller';
+import { AdminService } from './admin.service';
 import { AlertsController } from './alerts.controller';
 import { AlertsService } from './alerts.service';
 import { AlertsWatcher } from './alerts.watcher';
@@ -32,10 +35,14 @@ import { WebLinkService } from './web-link.service';
     FlipsController,
     ProAdminController,
     TributeController,
+    AdminController,
   ],
   providers: [
     TelegramBotService,
     TelegramAuthGuard,
+    AccessService,
+    AdminService,
+    AdminGuard,
     AlertsService,
     AlertsWatcher,
     BotCommandsService,

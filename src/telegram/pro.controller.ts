@@ -13,6 +13,7 @@ import { IsIn, IsInt, Matches, Max, Min } from 'class-validator';
 import { REGIONS, type Region } from 'src/api/dto/queries.dto';
 import { ServerGuard } from 'src/common/guards/server.guard';
 import { FlipperService } from 'src/flipper/flipper.service';
+import { AccessService } from './access.service';
 import { ProService } from './pro.service';
 import { TelegramAuthGuard, type TelegramRequest } from './telegram-auth.guard';
 
@@ -37,12 +38,19 @@ class GrantProDto {
 @Controller('api/me')
 @UseGuards(TelegramAuthGuard)
 export class MeController {
-  constructor(private readonly pro: ProService) {}
+  constructor(
+    private readonly pro: ProService,
+    private readonly access: AccessService,
+  ) {}
 
   @Get()
   @Header('Cache-Control', 'no-store')
-  me(@Req() req: TelegramRequest) {
-    return this.pro.status(req.tgUser.id);
+  async me(@Req() req: TelegramRequest) {
+    const status = await this.pro.status(req.tgUser.id);
+    return {
+      ...status,
+      ...(this.access.isAdmin(req.tgUser.id) && { admin: true }),
+    };
   }
 
   /** Взять пробный Pro (один раз). Отдаёт новый статус. */

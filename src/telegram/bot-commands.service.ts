@@ -1,6 +1,7 @@
 import { Injectable, OnModuleInit } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { REGIONS, type Region } from 'src/api/dto/queries.dto';
+import { AccessService, isBanned } from './access.service';
 import { AlertsService } from './alerts.service';
 import {
   alertTitle,
@@ -26,6 +27,7 @@ export class BotCommandsService implements OnModuleInit {
     private readonly bot: TelegramBotService,
     private readonly alerts: AlertsService,
     private readonly webLink: WebLinkService,
+    private readonly access: AccessService,
     config: ConfigService,
   ) {
     this.appUrl = config.get<string>('TELEGRAM_APP_URL')?.trim() || undefined;
@@ -41,6 +43,16 @@ export class BotCommandsService implements OnModuleInit {
 
     const msg = update.message;
     if (!msg?.text || !msg.from || msg.chat.type !== 'private') return;
+    // бан от админа: бот не отвечает (кроме одного пояснения на /start)
+    const banned = await this.access.bannedUntil(String(msg.from.id));
+    if (isBanned(banned) && !this.access.isAdmin(msg.from.id)) {
+      if (msg.text.startsWith('/start'))
+        await this.bot.send(
+          msg.chat.id,
+          'Доступ к STALZONE INFO ограничен администратором.',
+        );
+      return;
+    }
     const command = msg.text.split(/[\s@]/)[0].toLowerCase();
 
     switch (command) {
@@ -150,6 +162,11 @@ export class BotCommandsService implements OnModuleInit {
 
   private async handleCallback(update: TgUpdate) {
     const q = update.callback_query!;
+    if (
+      isBanned(await this.access.bannedUntil(String(q.from.id))) &&
+      !this.access.isAdmin(q.from.id)
+    )
+      return;
     const message: TgMessage | undefined = q.message;
     const [action, arg] = (q.data ?? '').split(':');
     let notice = '';

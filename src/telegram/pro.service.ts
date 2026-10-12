@@ -100,6 +100,17 @@ export class ProService {
     }
   }
 
+  /** Ровно до until (админ); null — снять Pro. */
+  async setUntil(chatId: number | bigint, until: Date | null) {
+    const id = BigInt(chatId);
+    await this.prisma.telegramSubscriber.upsert({
+      where: { chatId: id },
+      create: { chatId: id, proUntil: until },
+      update: { proUntil: until },
+    });
+    return until;
+  }
+
   /** Pro как минимум до until (подписка Tribute сама знает дату окончания). */
   async extendTo(chatId: number | bigint, until: Date) {
     const id = BigInt(chatId);

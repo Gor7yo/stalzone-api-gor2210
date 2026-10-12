@@ -26,6 +26,11 @@ import { decide, unitPrice } from './price-match';
 import { isProActive, PRICE_ALERT_LIMIT } from './pro.service';
 import { InlineButton, TelegramBotService } from './telegram-bot.service';
 
+/** Забаненным админом уведомления не шлём. */
+const notBanned = () => ({
+  OR: [{ bannedUntil: null }, { bannedUntil: { lte: new Date() } }],
+});
+
 const EMISSION_EVERY_MS = 30_000;
 const PRICES_EVERY_MS = 60_000;
 /** Лента флиппера пересчитывается раз в минуту — чаще проверять нет смысла. */
@@ -101,7 +106,11 @@ export class AlertsWatcher implements OnApplicationBootstrap, OnModuleDestroy {
 
   async checkEmission() {
     const subscribers = await this.prisma.telegramSubscriber.findMany({
-      where: { blocked: false, NOT: { emissionRegions: { isEmpty: true } } },
+      where: {
+        blocked: false,
+        ...notBanned(),
+        NOT: { emissionRegions: { isEmpty: true } },
+      },
       select: { chatId: true, emissionRegions: true },
     });
     const regions = new Set(subscribers.flatMap((s) => s.emissionRegions));
@@ -145,7 +154,13 @@ export class AlertsWatcher implements OnApplicationBootstrap, OnModuleDestroy {
   async checkFlips() {
     // флип-алерты — функция Pro: у кого подписка кончилась, алерт молча ждёт продления
     const alerts = await this.prisma.flipAlert.findMany({
-      where: { subscriber: { blocked: false, proUntil: { gt: new Date() } } },
+      where: {
+        subscriber: {
+          blocked: false,
+          ...notBanned(),
+          proUntil: { gt: new Date() },
+        },
+      },
     });
     const regions = [...new Set(alerts.map((a) => a.region))];
     const feeds = new Map(
@@ -207,7 +222,7 @@ export class AlertsWatcher implements OnApplicationBootstrap, OnModuleDestroy {
 
   async checkPrices() {
     const all = await this.prisma.priceAlert.findMany({
-      where: { subscriber: { blocked: false } },
+      where: { subscriber: { blocked: false, ...notBanned() } },
       orderBy: { createdAt: 'asc' },
       include: { subscriber: { select: { proUntil: true } } },
     });

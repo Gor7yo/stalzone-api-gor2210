@@ -58,6 +58,29 @@ model Clan {
 // ---------- алерты в Telegram-боте ----------
 
 /// Пользователь Telegram, который запустил бота или включил алерт в мини-приложении.
+/// Кто заходил в какой день — для графика активных пользователей (DAU)
+model ActivityDay {
+  day    DateTime @db.Date
+  chatId BigInt
+
+  @@id([day, chatId])
+  @@map("activity_days")
+}
+
+/// Журнал действий админа: выдача/снятие Pro, баны
+model AdminLog {
+  id        String   @id @default(uuid())
+  adminId   BigInt
+  targetId  BigInt
+  /// pro_grant | pro_revoke | ban | unban
+  action    String
+  details   String?
+  createdAt DateTime @default(now())
+
+  @@index([createdAt])
+  @@map("admin_logs")
+}
+
 /// Обработанные платежи Tribute — вебхук повторяется, Pro выдаём один раз
 model ProPayment {
   /// "product:<purchase_id>" или "sub:<subscription_id>:<expires_at>"
@@ -85,6 +108,11 @@ model TelegramSubscriber {
   proUntil DateTime?
   /// Когда взят пробный Pro (один раз на Telegram); null — ещё не брал
   trialUsedAt DateTime?
+  /// Бан от админа до этого момента (далёкое будущее — навсегда); null — нет
+  bannedUntil DateTime?
+  banReason   String?
+  /// Последний визит в мини-приложение / на сайт (обновляется не чаще раза в 10 мин)
+  lastSeenAt  DateTime?
 
   createdAt   DateTime     @default(now())
   updatedAt   DateTime     @updatedAt
