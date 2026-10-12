@@ -55,6 +55,11 @@ export class TributeController {
     });
     if (action.kind === 'ignore') {
       this.logger.log(`Tribute ${hook.name}: пропуск (${action.reason})`);
+      // незнакомый формат — пишем тело (подпись уже проверена, ключей API в нём нет)
+      if (!hook.name || !hook.payload)
+        this.logger.warn(
+          `Tribute: неизвестный формат: ${req.rawBody.toString('utf8').slice(0, 1500)}`,
+        );
       return { ok: true };
     }
 
