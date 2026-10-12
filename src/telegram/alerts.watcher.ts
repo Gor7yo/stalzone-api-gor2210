@@ -141,7 +141,7 @@ export class AlertsWatcher implements OnApplicationBootstrap, OnModuleDestroy {
       for (const { chatId } of recipients) {
         await this.bot.send(
           chatId,
-          `☢️ <b>Выброс начался</b> · ${REGION_LABEL[region]}\nСкорее в укрытие, сталкер!`,
+          `☢️ <b>Выброс начался</b> · ${REGION_LABEL[region]}\nСкорее в укрытие!`,
           link ? [[{ text: 'Открыть таймер', url: link }]] : [],
         );
         await sleep(SEND_GAP_MS);

@@ -3,7 +3,7 @@ const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
 /** Квота кончилась, а ждать запросу нельзя (фоновый сборщик) — пропускаем ход. */
 export class BudgetExhaustedError extends Error {
   constructor() {
-    super('Квота STALCRAFT API на эту минуту исчерпана');
+    super('Квота STALZONE API на эту минуту исчерпана');
   }
 }
 

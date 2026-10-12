@@ -95,7 +95,7 @@ export class ProService {
       throw new ForbiddenException({
         statusCode: 403,
         code: 'pro_required',
-        message: 'Доступно в Stalzone Pro',
+        message: 'Доступно в STALZONE INFO Pro',
       });
     }
   }

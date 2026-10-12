@@ -46,6 +46,8 @@ const ROTATION = ['lots', 'sales', 'lots', 'sales', 'backfill'] as const;
  */
 const FORGET_MS = DAY;
 const PRUNE_EVERY_MS = 60 * MIN;
+/** Ушедшие лоты (goneAt) храним неделю, потом удаляем. */
+const GONE_LOTS_KEEP_MS = 7 * DAY;
 /** Начало «всей истории» для historyFrom. */
 const EPOCH = new Date(0);
 
@@ -149,6 +151,7 @@ export class CollectorService
    * стартового списка, сутки не нужны людям и без алертов. Накопленные продажи остаются.
    */
   private async prune() {
+    await this.pruneGoneLots();
     const cutoff = new Date(Date.now() - FORGET_MS);
     // предметы под ценовыми алертами — из БД (this.alerted при старте ещё пуст)
     const alerts = await this.prisma.priceAlert
@@ -173,6 +176,19 @@ export class CollectorService
       });
     if (count)
       this.logger.log(`Сборщик: из списка выпало ${count} ненужных предметов`);
+  }
+
+  /** Ушедшие с аукциона лоты (выкуплены/истекли) никто не читает — удаляем через GONE_LOTS_KEEP_MS. */
+  private async pruneGoneLots() {
+    const { count } = await this.prisma.auctionLot
+      .deleteMany({
+        where: { goneAt: { lt: new Date(Date.now() - GONE_LOTS_KEEP_MS) } },
+      })
+      .catch((error: unknown) => {
+        this.logger.warn(`очистка лотов: ${String(error)}`);
+        return { count: 0 };
+      });
+    if (count) this.logger.log(`Сборщик: удалено ${count} ушедших лотов`);
   }
 
   /** Интервалы обновления (лоты, продажи) по ликвидности и интересу пользователей. */

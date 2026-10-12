@@ -86,14 +86,14 @@ export class BotCommandsService implements OnModuleInit {
     await this.bot.send(
       chatId,
       [
-        '<b>Сталкер, я пришлю уведомление, когда:</b>',
+        '<b>Я пришлю уведомление, когда:</b>',
         '🔔 предмет на аукционе стал дешевле твоего порога — включается кнопкой 🔔 на странице предмета в приложении;',
         '💰 появился выгодный флип — включается во «Флиппере» в приложении;',
         '☢️ начался выброс — /emission',
         '',
         'Список алертов — /alerts, отключить всё — /stop',
       ].join('\n'),
-      link ? [[{ text: 'Открыть Stalzone', url: link }]] : [],
+      link ? [[{ text: 'Открыть STALZONE INFO', url: link }]] : [],
     );
   }
 
@@ -103,7 +103,7 @@ export class BotCommandsService implements OnModuleInit {
     await this.bot.send(
       chatId,
       [
-        '🔗 <b>Привязать сайт Stalzone к этому Telegram?</b>',
+        '🔗 <b>Привязать сайт STALZONE INFO к этому Telegram?</b>',
         'Уведомления, включённые на сайте, будут приходить сюда.',
         '',
         'Если вы не нажимали «Привязать Telegram» на сайте — просто проигнорируйте это сообщение.',
