@@ -1,0 +1,432 @@
+[
+  {
+    "id": "zy32",
+    "name": "Батарейка",
+    "group": "artefact"
+  },
+  {
+    "id": "5r5g",
+    "name": "Ледяной ежик",
+    "group": "artefact"
+  },
+  {
+    "id": "y54z",
+    "name": "Гиря",
+    "group": "artefact"
+  },
+  {
+    "id": "wg3p",
+    "name": "Дезинтегратор",
+    "group": "artefact"
+  },
+  {
+    "id": "4lkp",
+    "name": "Лампочка Ильича",
+    "group": "artefact"
+  },
+  {
+    "id": "kqr0",
+    "name": "Гелий",
+    "group": "artefact"
+  },
+  {
+    "id": "qo06",
+    "name": "Трансформатор",
+    "group": "artefact"
+  },
+  {
+    "id": "lj0j",
+    "name": "Катушка",
+    "group": "artefact"
+  },
+  {
+    "id": "wglp",
+    "name": "Ветка Калины",
+    "group": "artefact"
+  },
+  {
+    "id": "4l7p",
+    "name": "Гребешок",
+    "group": "artefact"
+  },
+  {
+    "id": "kqp0",
+    "name": "Жар-птица",
+    "group": "artefact"
+  },
+  {
+    "id": "qoq6",
+    "name": "Солнце",
+    "group": "artefact"
+  },
+  {
+    "id": "jkq7",
+    "name": "Магма",
+    "group": "artefact"
+  },
+  {
+    "id": "ljrj",
+    "name": "Радиатор",
+    "group": "artefact"
+  },
+  {
+    "id": "rnvg",
+    "name": "Шишка",
+    "group": "artefact"
+  },
+  {
+    "id": "zyo9",
+    "name": "Болотный гнилец",
+    "group": "artefact"
+  },
+  {
+    "id": "y5yw",
+    "name": "Гантель",
+    "group": "artefact"
+  },
+  {
+    "id": "wgzd",
+    "name": "Остов",
+    "group": "artefact"
+  },
+  {
+    "id": "4lml",
+    "name": "Змеиный глаз",
+    "group": "artefact"
+  },
+  {
+    "id": "kqj3",
+    "name": "Улитка",
+    "group": "artefact"
+  },
+  {
+    "id": "qo59",
+    "name": "Жвачка",
+    "group": "artefact"
+  },
+  {
+    "id": "jkj4",
+    "name": "Ряска",
+    "group": "artefact"
+  },
+  {
+    "id": "ljpq",
+    "name": "Многогранник",
+    "group": "artefact"
+  },
+  {
+    "id": "rnkl",
+    "name": "Силки",
+    "group": "artefact"
+  },
+  {
+    "id": "04yr",
+    "name": "Виток",
+    "group": "artefact"
+  },
+  {
+    "id": "gy06",
+    "name": "Ершик",
+    "group": "artefact"
+  },
+  {
+    "id": "zy7y",
+    "name": "Ежик",
+    "group": "artefact"
+  },
+  {
+    "id": "5rd1",
+    "name": "Стальной Ежик",
+    "group": "artefact"
+  },
+  {
+    "id": "gyv6",
+    "name": "Роза",
+    "group": "artefact"
+  },
+  {
+    "id": "zyly",
+    "name": "Цибуля",
+    "group": "artefact"
+  },
+  {
+    "id": "5rg1",
+    "name": "Проклятая роза",
+    "group": "artefact"
+  },
+  {
+    "id": "y5jk",
+    "name": "Жильник",
+    "group": "artefact"
+  },
+  {
+    "id": "wg62",
+    "name": "Белая роза",
+    "group": "artefact"
+  },
+  {
+    "id": "4l1r",
+    "name": "Протоцибуля",
+    "group": "artefact"
+  },
+  {
+    "id": "kqgy",
+    "name": "Браслет",
+    "group": "artefact"
+  },
+  {
+    "id": "qokj",
+    "name": "Тыква",
+    "group": "artefact"
+  },
+  {
+    "id": "9nvy",
+    "name": "Вехотка",
+    "group": "artefact"
+  },
+  {
+    "id": "gyg5",
+    "name": "Креветка",
+    "group": "artefact"
+  },
+  {
+    "id": "zypm",
+    "name": "Золотистая Прима",
+    "group": "artefact"
+  },
+  {
+    "id": "5rpq",
+    "name": "Янтарник",
+    "group": "artefact"
+  },
+  {
+    "id": "y5m3",
+    "name": "Криоген",
+    "group": "artefact"
+  },
+  {
+    "id": "wgr3",
+    "name": "Темный кристалл",
+    "group": "artefact"
+  },
+  {
+    "id": "4lpo",
+    "name": "Статик",
+    "group": "artefact"
+  },
+  {
+    "id": "gyq5",
+    "name": "Спираль",
+    "group": "artefact"
+  },
+  {
+    "id": "zyrm",
+    "name": "Зеркало",
+    "group": "artefact"
+  },
+  {
+    "id": "5rwq",
+    "name": "Осколок",
+    "group": "artefact"
+  },
+  {
+    "id": "y5w3",
+    "name": "Призма",
+    "group": "artefact"
+  },
+  {
+    "id": "wg53",
+    "name": "Атом",
+    "group": "artefact"
+  },
+  {
+    "id": "5rzo",
+    "name": "Корка",
+    "group": "artefact"
+  },
+  {
+    "id": "y5k0",
+    "name": "Вихрь",
+    "group": "artefact"
+  },
+  {
+    "id": "wgwz",
+    "name": "Фаренгейт",
+    "group": "artefact"
+  },
+  {
+    "id": "kqoj",
+    "name": "Каблук",
+    "group": "artefact"
+  },
+  {
+    "id": "qo94",
+    "name": "Куриный бог",
+    "group": "artefact"
+  },
+  {
+    "id": "jkml",
+    "name": "Глаз бури",
+    "group": "artefact"
+  },
+  {
+    "id": "ljn2",
+    "name": "Морозец",
+    "group": "artefact"
+  },
+  {
+    "id": "rn1z",
+    "name": "Опал",
+    "group": "artefact"
+  },
+  {
+    "id": "9n7z",
+    "name": "Рубик",
+    "group": "artefact"
+  },
+  {
+    "id": "1kw1",
+    "name": "Кристалл Изнанки",
+    "group": "artefact"
+  },
+  {
+    "id": "gy7p",
+    "name": "Сетчатка",
+    "group": "artefact"
+  },
+  {
+    "id": "zymn",
+    "name": "Смалец",
+    "group": "artefact"
+  },
+  {
+    "id": "5rm0",
+    "name": "Ключик",
+    "group": "artefact"
+  },
+  {
+    "id": "y5ro",
+    "name": "Яйцо",
+    "group": "artefact"
+  },
+  {
+    "id": "wgko",
+    "name": "Роза Изнанки",
+    "group": "artefact"
+  },
+  {
+    "id": "4lrn",
+    "name": "Висмут",
+    "group": "artefact"
+  },
+  {
+    "id": "kq4v",
+    "name": "Темная калина",
+    "group": "artefact"
+  },
+  {
+    "id": "qodk",
+    "name": "Бубльгум",
+    "group": "artefact"
+  },
+  {
+    "id": "jky6",
+    "name": "Изюм",
+    "group": "artefact"
+  },
+  {
+    "id": "w4no",
+    "name": "Канифоль",
+    "group": "artefact"
+  },
+  {
+    "id": "49zn",
+    "name": "Нервяк",
+    "group": "artefact"
+  },
+  {
+    "id": "k3yv",
+    "name": "Обруч",
+    "group": "artefact"
+  },
+  {
+    "id": "q1lk",
+    "name": "Жабры",
+    "group": "artefact"
+  },
+  {
+    "id": "j3p6",
+    "name": "Смольник",
+    "group": "artefact"
+  },
+  {
+    "id": "g34p",
+    "name": "Юла",
+    "group": "artefact"
+  },
+  {
+    "id": "zjzn",
+    "name": "Полено",
+    "group": "artefact"
+  },
+  {
+    "id": "51l0",
+    "name": "Харя",
+    "group": "artefact"
+  },
+  {
+    "id": "yq3o",
+    "name": "Личинка",
+    "group": "artefact"
+  },
+  {
+    "id": "w4jo",
+    "name": "Черная дыра",
+    "group": "artefact"
+  },
+  {
+    "id": "7z77",
+    "name": "Желе",
+    "group": "artefact"
+  },
+  {
+    "id": "6goy",
+    "name": "Петля",
+    "group": "artefact"
+  },
+  {
+    "id": "k3rv",
+    "name": "Чертов еж",
+    "group": "artefact"
+  },
+  {
+    "id": "q10k",
+    "name": "Звено",
+    "group": "artefact"
+  },
+  {
+    "id": "j306",
+    "name": "Всполох",
+    "group": "artefact"
+  },
+  {
+    "id": "j3ml",
+    "name": "Контейнер «КСМ»",
+    "group": "containers"
+  },
+  {
+    "id": "g35n",
+    "name": "Контейнер «Берлога-6»",
+    "group": "containers"
+  },
+  {
+    "id": "j34l",
+    "name": "Контейнер «Дубак»",
+    "group": "containers"
+  },
+  {
+    "id": "l362",
+    "name": "Контейнер «КРАБ-6»",
+    "group": "containers"
+  }
+]

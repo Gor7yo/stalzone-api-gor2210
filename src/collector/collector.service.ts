@@ -28,8 +28,11 @@ const BACKFILL_DAYS = 30;
 const WANTED_MS = 30 * MIN;
 /** Как часто сборщик смотрит, нет ли просроченной задачи. */
 const TICK_MS = 1_000;
-/** Сколько задач одновременно: EXBO отвечает 2–3 с, по одной квота бы простаивала. */
-const CONCURRENCY = 3;
+/**
+ * Сколько задач одновременно: EXBO отвечает 2–3 с, так что 6 потоков ≈ 140 запросов/мин —
+ * под лимит 400 токенов (запрос аукциона = 2) за вычетом резерва для людей.
+ */
+const CONCURRENCY = 6;
 /** Бронь задачи на время выполнения: если процесс упадёт, через 2 мин её возьмут снова. */
 const LEASE_MS = 2 * MIN;
 /**
@@ -37,6 +40,12 @@ const LEASE_MS = 2 * MIN;
  * есть просроченные снимки, — иначе при нехватке квоты она не начнётся никогда.
  */
 const ROTATION = ['lots', 'sales', 'lots', 'sales', 'backfill'] as const;
+/**
+ * Предмет не из стартового списка, который сутки никто не открывал и без алерта, —
+ * выпадает из сборщика (снова добавится, если откроют). Проверка — раз в час.
+ */
+const FORGET_MS = DAY;
+const PRUNE_EVERY_MS = 60 * MIN;
 /** Начало «всей истории» для historyFrom. */
 const EPOCH = new Date(0);
 
@@ -71,6 +80,7 @@ export class CollectorService
   private readonly regions: Region[];
   readonly enabled: boolean;
   private timer?: NodeJS.Timeout;
+  private pruneTimer?: NodeJS.Timeout;
   /** сколько задач сейчас выполняется */
   private running = 0;
   private ticking = false;
@@ -99,7 +109,7 @@ export class CollectorService
     private readonly stalcraft: StalcraftApiClient,
     config: ConfigService,
   ) {
-    const regions = String(config.get('COLLECTOR_REGIONS') ?? 'ru')
+    const regions = String(config.get('COLLECTOR_REGIONS') ?? 'ru,eu')
       .split(',')
       .map((r) => r.trim())
       .filter((r): r is Region => (REGIONS as readonly string[]).includes(r));
@@ -125,10 +135,44 @@ export class CollectorService
       `Сборщик запущен: регионы ${this.regions.join(', ')}, новых предметов в списке ${count}`,
     );
     this.timer = setInterval(() => void this.tick(), TICK_MS);
+    void this.prune();
+    this.pruneTimer = setInterval(() => void this.prune(), PRUNE_EVERY_MS);
   }
 
   onModuleDestroy() {
     clearInterval(this.timer);
+    clearInterval(this.pruneTimer);
+  }
+
+  /**
+   * Чистит список от случайных предметов: попали из списков цен или старого
+   * стартового списка, сутки не нужны людям и без алертов. Накопленные продажи остаются.
+   */
+  private async prune() {
+    const cutoff = new Date(Date.now() - FORGET_MS);
+    // предметы под ценовыми алертами — из БД (this.alerted при старте ещё пуст)
+    const alerts = await this.prisma.priceAlert
+      .findMany({
+        select: { region: true, itemId: true },
+        distinct: ['region', 'itemId'],
+      })
+      .catch(() => null);
+    if (!alerts) return;
+    const { count } = await this.prisma.trackedItem
+      .deleteMany({
+        where: {
+          itemId: { notIn: SEED_ITEMS.map((s) => s.id) },
+          createdAt: { lt: cutoff },
+          OR: [{ wantedAt: null }, { wantedAt: { lt: cutoff } }],
+          NOT: alerts,
+        },
+      })
+      .catch((error: unknown) => {
+        this.logger.warn(`очистка списка: ${String(error)}`);
+        return { count: 0 };
+      });
+    if (count)
+      this.logger.log(`Сборщик: из списка выпало ${count} ненужных предметов`);
   }
 
   /** Интервалы обновления (лоты, продажи) по ликвидности и интересу пользователей. */
@@ -138,7 +182,7 @@ export class CollectorService
     const s = item.salesPerDay;
     const base =
       s >= 100
-        ? { lots: 3 * MIN, sales: 5 * MIN }
+        ? { lots: 2 * MIN, sales: 5 * MIN }
         : s >= 20
           ? { lots: 10 * MIN, sales: 15 * MIN }
           : s >= 2

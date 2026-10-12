@@ -5,7 +5,7 @@
 //   node scripts/build-tracked-seed.mjs ../stalzone-front-nextjs/public
 //
 // Результат: src/collector/seed-items.ts (коммитится, обновлять после патчей игры).
-import { readFileSync, writeFileSync } from 'node:fs';
+import { existsSync, readFileSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 
 const GROUPS = ['artefact', 'armor', 'weapon', 'containers', 'backpacks'];
@@ -20,9 +20,22 @@ const items = JSON.parse(readFileSync(join(dir, 'items.json'), 'utf8'));
 const barter = JSON.parse(readFileSync(join(dir, 'barter.json'), 'utf8'));
 const farm = new Set(Array.isArray(barter.farm) ? barter.farm : Object.keys(barter.farm));
 
+// Ручной белый список (src/collector/seed-items.json, [{ id, name, group }]): если он есть,
+// в сборщик идут только эти предметы — имена и категории берём свежие из справочника.
+const curatedPath = join(import.meta.dirname, '..', 'src', 'collector', 'seed-items.json');
+const curated = existsSync(curatedPath)
+  ? new Set(JSON.parse(readFileSync(curatedPath, 'utf8')).map((x) => x.id))
+  : null;
+if (curated) {
+  const known = new Set(items.items.map(([id]) => id));
+  const missing = [...curated].filter((id) => !known.has(id));
+  if (missing.length) console.warn(`Нет в справочнике (пропущены): ${missing.join(', ')}`);
+}
+
 // формат items.json: [id, nameRu, nameEn, colorIndex, categoryIndex]
 const seed = items.items
   .filter(([id, , , , cat]) => {
+    if (curated) return curated.has(id);
     const group = String(items.categories[cat] ?? '').split('/')[0];
     // weapon/device — детекторы и приборы, их не перепродают
     return GROUPS.includes(group) && !items.categories[cat].startsWith('weapon/device') && !farm.has(id);
@@ -35,7 +48,9 @@ writeFileSync(
   out,
   [
     '// Сгенерировано scripts/build-tracked-seed.mjs — не править руками.',
-    '// Стартовый список сборщика: артефакты, броня, оружие, контейнеры, рюкзаки.',
+    curated
+      ? '// Стартовый список сборщика — ручной белый список из src/collector/seed-items.json.'
+      : '// Стартовый список сборщика: артефакты, броня, оружие, контейнеры, рюкзаки.',
     '/* prettier-ignore */',
     `export const SEED_ITEMS: { id: string; name: string; group: string }[] = ${JSON.stringify(seed)};`,
     '',

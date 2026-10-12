@@ -45,9 +45,10 @@ export class StalcraftApiClient {
     this.baseUrl = config
       .getOrThrow<string>('STALZONE_API_URL')
       .replace(/\/+$/, '');
-    const perMinute = Number(config.get('EXBO_TOKENS_PER_MIN')) || 100;
+    // реальный лимит EXBO — 400/мин (x-ratelimit-limit); при ответе подстраиваемся под заголовок
+    const perMinute = Number(config.get('EXBO_TOKENS_PER_MIN')) || 400;
     const reserve =
-      Number(config.get('EXBO_USER_RESERVE')) || Math.round(perMinute * 0.3);
+      Number(config.get('EXBO_USER_RESERVE')) || Math.round(perMinute * 0.15);
     this.budget = new TokenBudget(perMinute, reserve);
   }
 
@@ -93,6 +94,12 @@ export class StalcraftApiClient {
         `Заголовки лимита EXBO: ${names.map((n) => `${n}=${String(headers[n])}`).join(', ')}`,
       );
     }
+    const limit = headers['x-ratelimit-limit'];
+    if (limit !== undefined && this.budget.setLimit(Number(limit))) {
+      this.logger.log(
+        `Лимит EXBO: ${this.budget.perMinute}/мин, резерв для людей ${this.budget.reserve}`,
+      );
+    }
     const remaining = names.find((n) => /remaining/i.test(n));
     if (remaining) this.budget.sync(Number(headers[remaining]));
   }
@@ -131,7 +138,10 @@ export class StalcraftApiClient {
 
       if (status === 429) {
         const retryAfter = Number(error.response?.headers?.['retry-after']);
-        this.budget.onRateLimited(retryAfter);
+        this.budget.onRateLimited(
+          retryAfter,
+          Number(error.response?.headers?.['x-ratelimit-reset']),
+        );
         this.logger.warn(`STALCRAFT API 429 ← /${path} (квота кончилась)`);
         // сборщик просто пропустит ход; пользовательский запрос подождёт квоту один раз
         if (priority === 'background') throw new BudgetExhaustedError();

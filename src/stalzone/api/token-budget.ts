@@ -26,11 +26,24 @@ export class TokenBudget {
   private spent = { user: 0, background: 0, since: Date.now() };
 
   constructor(
-    readonly perMinute: number,
+    public perMinute: number,
     /** сколько токенов сборщик обязан оставить людям */
-    readonly reserve: number,
+    public reserve: number,
+    /** доля резерва — чтобы пересчитать его, когда EXBO сообщит свой лимит */
+    private readonly reserveShare = reserve / perMinute,
   ) {
     this.tokens = perMinute;
+  }
+
+  /** EXBO сообщил лимит (x-ratelimit-limit) — подстраиваемся под него. */
+  setLimit(limit: number) {
+    if (!Number.isFinite(limit) || limit <= 0 || limit === this.perMinute)
+      return false;
+    this.refill();
+    this.perMinute = limit;
+    this.reserve = Math.round(limit * this.reserveShare);
+    this.tokens = Math.min(this.tokens, limit);
+    return true;
   }
 
   private refill() {
@@ -69,15 +82,22 @@ export class TokenBudget {
   }
 
   /** EXBO ответил 429: токенов нет до следующей минуты (или до Retry-After). */
-  onRateLimited(retryAfterSec?: number) {
+  onRateLimited(retryAfterSec?: number, resetAt?: number) {
     this.tokens = 0;
-    this.updatedAt = Date.now();
-    const untilNextMinute = 60_000 - (Date.now() % 60_000);
+    const now = Date.now();
+    this.updatedAt = now;
+    const untilNextMinute = 60_000 - (now % 60_000);
+    // точнее всего — время сброса от EXBO (x-ratelimit-reset, мс), если оно в разумных пределах
+    const untilReset =
+      resetAt && resetAt > now && resetAt - now <= 120_000
+        ? resetAt - now
+        : undefined;
     this.blockedUntil =
-      Date.now() +
-      (retryAfterSec && Number.isFinite(retryAfterSec)
-        ? retryAfterSec * 1000
-        : untilNextMinute);
+      now +
+      (untilReset ??
+        (retryAfterSec && Number.isFinite(retryAfterSec)
+          ? retryAfterSec * 1000
+          : untilNextMinute));
   }
 
   /** EXBO сообщил остаток сам (заголовок) — доверяем ему больше, чем своему счёту. */
