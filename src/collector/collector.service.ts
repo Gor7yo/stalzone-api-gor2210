@@ -17,7 +17,13 @@ import {
   type Priority,
 } from 'src/stalzone/api/token-budget';
 import type { Prisma, TrackedItem } from 'generated/prisma/client';
-import { FEE, MIN_DEALS, MIN_PCT, MIN_PROFIT } from 'src/flipper/flip-filter';
+import {
+  FEE,
+  FLIP_WINDOW_DAYS,
+  MIN_DEALS,
+  MIN_PCT,
+  MIN_PROFIT,
+} from 'src/flipper/flip-filter';
 import { SEED_ITEMS } from './seed-items';
 
 const MIN = 60_000;
@@ -240,12 +246,12 @@ export class CollectorService
   }
 
   /**
-   * Где чаще всего бывают флипы: сделки за неделю, прошедшие с прибылью для перекупщика
+   * Где чаще всего бывают флипы: сделки за окно флиппера, прошедшие с прибылью для перекупщика
    * (по порогам ленты) относительно медианы тех же качества и заточки. Чем их больше,
    * тем чаще проверяем новые лоты предмета (FRESH_TIERS).
    */
   private async rankFresh() {
-    const since = new Date(Date.now() - 7 * DAY);
+    const since = new Date(Date.now() - FLIP_WINDOW_DAYS * DAY);
     const scores = await this.prisma.$queryRaw<
       { region: string; itemId: string; score: number }[]
     >`

@@ -4,6 +4,7 @@ import { SEED_ITEMS } from 'src/collector/seed-items';
 import { PrismaService } from 'src/prisma/prisma.service';
 import {
   FEE,
+  FLIP_WINDOW_DAYS,
   MIN_DEALS,
   MIN_PCT,
   MIN_PROFIT,
@@ -13,8 +14,7 @@ import {
 
 const MIN = 60_000;
 const DAY = 24 * 60 * MIN;
-/** Окно сделок для оценки цены продажи. */
-const WINDOW_DAYS = 7;
+const WINDOW_DAYS = FLIP_WINDOW_DAYS;
 /** Лоты из снимков старше этого не показываем: их, скорее всего, уже выкупили. */
 const MAX_SNAPSHOT_AGE = 3 * 60 * MIN;
 /**
@@ -22,7 +22,7 @@ const MAX_SNAPSHOT_AGE = 3 * 60 * MIN;
  * за секунды, минутный кеш съедал бы эту скорость.
  */
 const TTL_MS = 15_000;
-/** Медианы по сделкам за неделю меняются медленно — их пересчитываем раз в 10 минут. */
+/** Медианы по сделкам за окно меняются медленно — их пересчитываем раз в 10 минут. */
 const PRICES_TTL_MS = 10 * MIN;
 
 export * from './flip-filter';
@@ -74,7 +74,7 @@ const iso = (d: Date) => new Date(d).toISOString().replace(/\.\d{3}Z$/, 'Z');
 /**
  * Флиппер: лоты, которые выгодно выкупить и перепродать.
  *
- * Цена продажи — медиана сделок за 7 дней с тем же качеством и заточкой;
+ * Цена продажи — медиана сделок за FLIP_WINDOW_DAYS дня с тем же качеством и заточкой;
  * если таких сделок мало — по ступени заточки. Прибыль = цена × количество × 0,95 − выкуп.
  * Всё считается по нашей БД (сборщик), EXBO не трогаем.
  */

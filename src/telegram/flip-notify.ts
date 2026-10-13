@@ -3,6 +3,7 @@ import {
   type Confidence,
   type Flip,
   type FlipFilter,
+  FLIP_WINDOW_DAYS,
   matchesFlip,
 } from '../flipper/flip-filter';
 import { escapeHtml, formatShort, QUALITY_LABEL, REGION_LABEL } from './format';
@@ -75,7 +76,7 @@ export function flipMessage(
     ...shown.flatMap(({ flip: f, lots }) => [
       `<b>${escapeHtml(flipTitle(f))}</b>${lots > 1 ? ` (${lots} лота)` : ''}`,
       `выкуп ${formatShort(f.unitPrice)} → ~${formatShort(f.sellUnit)}${f.amount > 1 ? ' /шт' : ''} · <b>+${formatShort(f.profit)}</b> (${f.pct.toLocaleString('ru-RU')} %)`,
-      `${CONFIDENCE_LABEL[f.confidence]} · ${f.deals} сделок за неделю`,
+      `${CONFIDENCE_LABEL[f.confidence]} · ${f.deals} сделок за ${FLIP_WINDOW_DAYS} дня`,
       '',
     ]),
   ];

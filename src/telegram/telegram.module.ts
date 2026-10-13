@@ -11,6 +11,7 @@ import { AlertsWatcher } from './alerts.watcher';
 import { BotCommandsService } from './bot-commands.service';
 import {
   FlipsController,
+  SellController,
   MeController,
   ProAdminController,
 } from './pro.controller';
@@ -33,6 +34,7 @@ import { WebLinkService } from './web-link.service';
     WebLinkController,
     MeController,
     FlipsController,
+    SellController,
     ProAdminController,
     TributeController,
     AdminController,

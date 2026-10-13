@@ -11,6 +11,7 @@ import {
   HistoryPeriodQueryDto,
 } from './dto/queries.dto';
 import { HistoryPeriodService } from './history-period.service';
+import { MarketService } from './market.service';
 
 /**
  * Cache-Control подсказывает браузеру/CDN, сколько можно не перезапрашивать ответ.
@@ -22,7 +23,15 @@ export class ApiController {
     private readonly apiService: ApiService,
     private readonly stalcraft: StalcraftApiClient,
     private readonly historyPeriod: HistoryPeriodService,
+    private readonly market: MarketService,
   ) {}
+
+  /** Радар рынка: подорожало / подешевело / больше всего сделок за сутки (из БД сборщика). */
+  @Get('market/radar')
+  @Header('Cache-Control', 'public, max-age=120')
+  getRadar(@Query() query: EmissionQueryDto) {
+    return this.market.radar(query.region);
+  }
 
   @Get('auction/lots')
   // коротко: в приложении есть кнопка «Обновить» (перезарядка 5 с после ответа)
