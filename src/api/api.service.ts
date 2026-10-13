@@ -1,4 +1,5 @@
 import { Injectable } from '@nestjs/common';
+import { ClansService, type ClanPage } from 'src/clans/clans.service';
 import { AuctionStore } from 'src/collector/auction-store.service';
 import { CollectorService } from 'src/collector/collector.service';
 import { StalcraftApiClient } from 'src/stalzone/api/stalcraft-api.client';
@@ -34,6 +35,7 @@ export class ApiService {
     private readonly stalcraft: StalcraftApiClient,
     private readonly collector: CollectorService,
     private readonly store: AuctionStore,
+    private readonly clans: ClansService,
   ) {}
 
   /**
@@ -108,11 +110,24 @@ export class ApiService {
     );
   }
 
-  /** Ответ в формате { [region]: { totalClans, data } } — так его ждёт фронтенд. */
-  async getClanList(q: ClanListQueryDto): Promise<IRegionData> {
+  /**
+   * Ответ в формате { [region]: { totalClans, data } } — так его ждёт фронтенд.
+   * Рейтинг — из своей копии списка (ClansService, квоту EXBO не тратит);
+   * пока регион не загружен целиком (сразу после деплоя) — напрямую из EXBO.
+   */
+  async getClanList(
+    q: ClanListQueryDto,
+  ): Promise<IRegionData | Record<string, ClanPage>> {
+    const limit = q.limit ?? 20;
+    const offset = q.offset ?? 0;
+    const own = await this.clans
+      .list(q.region, offset, limit)
+      .catch(() => null);
+    if (own) return { [q.region]: own };
+
     const list = await this.stalcraft.get<IClansList>(
       [q.region, 'clans'],
-      { limit: q.limit ?? 20, offset: q.offset ?? 0 },
+      { limit, offset },
       TTL.clans,
     );
     return {

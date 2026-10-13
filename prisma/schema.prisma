@@ -45,6 +45,8 @@ model StalzoneAccount {
   @@map("stalzone_accounts")
 }
 
+/// Клан из списка EXBO. Список целиком переписывает ClanSyncService (раз в несколько часов) —
+/// у EXBO нет поиска кланов, ищем по своей копии.
 model Clan {
   id     String @id
   region String
@@ -52,6 +54,24 @@ model Clan {
   tag    String
   leader String
 
+  level            Int       @default(0)
+  levelPoints      BigInt    @default(0)
+  memberCount      Int       @default(0)
+  alliance         String?
+  registrationTime DateTime?
+  description      String    @default("")
+  /// Место в рейтинге региона (порядок списка EXBO, с 1)
+  rank             Int       @default(0)
+  /// Для поиска: без цветовых кодов, в нижнем регистре, ё → е
+  tagKey           String    @default("")
+  nameKey          String    @default("")
+  leaderKey        String    @default("")
+  /// tagKey + nameKey + leaderKey одной строкой — на ней триграммный индекс (см. миграцию clan_search)
+  searchKey        String    @default("")
+  syncedAt         DateTime  @default(now())
+
+  @@index([region, rank])
+  @@index([searchKey(ops: raw("gin_trgm_ops"))], type: Gin)
   @@map("clans")
 }
 

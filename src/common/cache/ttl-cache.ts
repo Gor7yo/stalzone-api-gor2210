@@ -10,6 +10,11 @@ export class TtlCache<T> {
 
   constructor(private readonly maxEntries = 2000) {}
 
+  /** Забыть всё (данные под кешем обновились). Идущие загрузки доживают как есть. */
+  clear() {
+    this.store.clear();
+  }
+
   async getOrLoad(
     key: string,
     ttlMs: number,

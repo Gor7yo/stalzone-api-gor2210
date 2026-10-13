@@ -3,6 +3,7 @@ import { ConfigModule } from '@nestjs/config';
 import { APP_GUARD } from '@nestjs/core';
 import { ThrottlerGuard, ThrottlerModule } from '@nestjs/throttler';
 import { ApiModule } from './api/api.module';
+import { ClansModule } from './clans/clans.module';
 import { CollectorModule } from './collector/collector.module';
 import { validateEnv } from './config/validation';
 import { FlipperModule } from './flipper/flipper.module';
@@ -20,6 +21,7 @@ import { TelegramModule } from './telegram/telegram.module';
     StalzoneModule,
     CollectorModule,
     ApiModule,
+    ClansModule,
     FlipperModule,
     TelegramModule,
   ],
