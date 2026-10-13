@@ -28,16 +28,18 @@ class ClanSearchQueryDto extends EmissionQueryDto {
   limit?: number;
 }
 
-class ClanMetricsQueryDto extends EmissionQueryDto {
-  @Matches(/^[A-Za-z0-9_-]{1,64}$/, { message: 'id: некорректный ID клана' })
-  id!: string;
-
+class ClanTrendQueryDto extends EmissionQueryDto {
   /** Период графика: неделя (по часам), месяц и всё время (по дням) */
   @IsOptional()
   @IsIn(SERIES_PERIODS, {
     message: `period: одно из ${SERIES_PERIODS.join(', ')}`,
   })
   period?: SeriesPeriod;
+}
+
+class ClanMetricsQueryDto extends ClanTrendQueryDto {
+  @Matches(/^[A-Za-z0-9_-]{1,64}$/, { message: 'id: некорректный ID клана' })
+  id!: string;
 }
 
 @Controller('api/clan')
@@ -54,18 +56,25 @@ class ClansController {
     return this.clans.search(query.region, query.q, query.limit ?? 20);
   }
 
-  /** Метрики клана: рост очков, бойцы, место в рейтинге, график, соседи. */
+  /** График бойцов клана за период. */
   @Get('metrics')
   @Header('Cache-Control', 'public, max-age=120')
   clanMetrics(@Query() query: ClanMetricsQueryDto) {
     return this.metrics.clan(query.region, query.id, query.period ?? 'week');
   }
 
-  /** Сводка по кланам региона: топы роста, группировки, новые и распущенные, распределения. */
+  /** Сводка по кланам региона: рост и отток бойцов, группировки, новые и распущенные, распределения. */
   @Get('analytics')
   @Header('Cache-Control', 'public, max-age=300')
   analytics(@Query() query: EmissionQueryDto) {
     return this.metrics.region(query.region);
+  }
+
+  /** Бойцы и кланы региона во времени: всего и по группировкам. */
+  @Get('analytics/trend')
+  @Header('Cache-Control', 'public, max-age=300')
+  trend(@Query() query: ClanTrendQueryDto) {
+    return this.metrics.regionTrend(query.region, query.period ?? 'week');
   }
 }
 

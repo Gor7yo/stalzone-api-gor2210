@@ -3,20 +3,19 @@ import { Prisma } from 'generated/prisma/client';
 import { TtlCache } from 'src/common/cache/ttl-cache';
 import { PrismaService } from 'src/prisma/prisma.service';
 import {
-  levelSince,
-  peakMembers,
+  periodStart,
+  periodStep,
+  regionSeries,
   series,
   summarizeRegion,
-  WINDOWS,
-  windowDelta,
   type RegionClan,
+  type RegionEvent,
   type SeriesPeriod,
-  type Snap,
 } from './clan-metrics';
 
 const MIN = 60_000;
 const DAY = 24 * 60 * MIN;
-/** История пишется раз в час — метрики клана держим 5 минут, сводку региона — 10. */
+/** История пишется раз в час — график клана держим 5 минут, сводку и динамику региона — 10. */
 const CLAN_TTL_MS = 5 * MIN;
 const REGION_TTL_MS = 10 * MIN;
 /** Распущенных за неделю показываем столько. */
@@ -31,16 +30,22 @@ interface RegionRow {
   memberCount: number;
   registrationTime: Date | null;
   d_members: number | null;
-  d_level: number | null;
   d_at: Date | null;
   w_members: number | null;
-  w_level: number | null;
   w_at: Date | null;
+}
+
+interface EventRow {
+  /** начало корзины, секунды с 1970 (UTC) */
+  b: number;
+  alliance: string | null;
+  dm: number;
+  dc: number;
 }
 
 /** Последний снимок клана не позже t — одна строка по индексу (clanId, at). */
 const lastBefore = (t: Date) => Prisma.sql`
-  SELECT s."memberCount", s."level", s."at" FROM "clan_snapshots" s
+  SELECT s."memberCount", s."at" FROM "clan_snapshots" s
   WHERE s."clanId" = c."id" AND s."at" <= ${t}
   ORDER BY s."at" DESC LIMIT 1`;
 
@@ -51,19 +56,30 @@ const lastBefore = (t: Date) => Prisma.sql`
 @Injectable()
 export class ClanMetricsService {
   private readonly clanCache = new TtlCache<unknown>(500);
-  private readonly regionCache = new TtlCache<unknown>(10);
+  private readonly regionCache = new TtlCache<unknown>(20);
 
   constructor(private readonly prisma: PrismaService) {}
 
+  /** График бойцов клана за период. */
   clan(region: string, id: string, period: SeriesPeriod) {
     return this.clanCache.getOrLoad(`${id}|${period}`, CLAN_TTL_MS, () =>
       this.computeClan(region, id, period),
     );
   }
 
+  /** Сводка по кланам региона (сейчас и за сутки / неделю). */
   region(region: string) {
     return this.regionCache.getOrLoad(region, REGION_TTL_MS, () =>
       this.computeRegion(region),
+    );
+  }
+
+  /** Бойцы и кланы региона во времени — всего и по группировкам. */
+  regionTrend(region: string, period: SeriesPeriod) {
+    return this.regionCache.getOrLoad(
+      `trend|${region}|${period}`,
+      REGION_TTL_MS,
+      () => this.computeTrend(region, period),
     );
   }
 
@@ -72,45 +88,69 @@ export class ClanMetricsService {
     if (!c || c.region !== region) {
       return { id, region, available: false as const };
     }
-    const [rows, bigger, total] = await Promise.all([
-      this.prisma.clanSnapshot.findMany({
-        where: { clanId: id },
-        orderBy: { at: 'asc' },
-        select: { at: true, level: true, memberCount: true },
-      }),
-      // место по численности: сколько живых кланов региона крупнее
-      this.prisma.clan.count({
-        where: { region, goneAt: null, memberCount: { gt: c.memberCount } },
-      }),
-      this.prisma.clan.count({ where: { region, goneAt: null } }),
-    ]);
-    const snaps: Snap[] = rows.map((r) => ({
+    const rows = await this.prisma.clanSnapshot.findMany({
+      where: { clanId: id },
+      orderBy: { at: 'asc' },
+      select: { at: true, level: true, memberCount: true },
+    });
+    const snaps = rows.map((r) => ({
       at: r.at.getTime(),
       level: r.level,
       memberCount: r.memberCount,
     }));
     const now = Date.now();
-    const current: Snap = {
-      at: now,
-      level: c.level,
-      memberCount: c.memberCount,
-    };
-
     return {
       id,
       region,
       available: true as const,
-      updatedAt: c.syncedAt.toISOString(),
-      gone: c.goneAt?.toISOString() ?? null,
       historyFrom: snaps[0] ? new Date(snaps[0].at).toISOString() : null,
-      current: { memberCount: c.memberCount, level: c.level },
-      /** место по числу бойцов среди живых кланов региона (одинаковые — одно место) */
-      sizePlace: { place: bigger + 1, of: total },
-      windows: WINDOWS.map((w) => windowDelta(snaps, current, now, w)),
-      peak: peakMembers(snaps, current),
-      levelSince: levelSince(snaps, current),
       period,
-      series: series(snaps, current, now, period),
+      series: series(
+        snaps,
+        { at: now, level: c.level, memberCount: c.memberCount },
+        now,
+        period,
+      ),
+    };
+  }
+
+  /**
+   * Изменения по корзинам времени: разница бойцов с прошлым снимком клана (первый снимок —
+   * появление клана), минус состав распущенных в момент роспуска. Накопленную сумму
+   * считает regionSeries.
+   */
+  private async computeTrend(region: string, period: SeriesPeriod) {
+    const now = Date.now();
+    const step = periodStep(period);
+    const stepSec = step / 1000;
+    const events = await this.prisma.$queryRaw<EventRow[]>`
+      WITH s AS (
+        SELECT s."at", c."alliance",
+               s."memberCount" - COALESCE(LAG(s."memberCount") OVER w, 0) AS dm,
+               CASE WHEN LAG(s."at") OVER w IS NULL THEN 1 ELSE 0 END AS dc
+        FROM "clan_snapshots" s JOIN "clans" c ON c."id" = s."clanId"
+        WHERE s."region" = ${region}
+        WINDOW w AS (PARTITION BY s."clanId" ORDER BY s."at")
+        UNION ALL
+        SELECT c."goneAt", c."alliance", -c."memberCount", -1
+        FROM "clans" c WHERE c."region" = ${region} AND c."goneAt" IS NOT NULL
+      )
+      SELECT (floor(extract(epoch FROM "at") / ${stepSec}) * ${stepSec})::float8 AS b,
+             "alliance", sum(dm)::int AS dm, sum(dc)::int AS dc
+      FROM s GROUP BY 1, 2 ORDER BY 1`;
+    const list: RegionEvent[] = events.map((e) => ({
+      t: e.b * 1000,
+      alliance: e.alliance,
+      dm: e.dm,
+      dc: e.dc,
+    }));
+    const first = list[0]?.t ?? now;
+    return {
+      region,
+      period,
+      updatedAt: new Date(now).toISOString(),
+      historyFrom: list.length ? new Date(first).toISOString() : null,
+      points: regionSeries(list, periodStart(period, now, first), now, step),
     };
   }
 
@@ -123,15 +163,13 @@ export class ClanMetricsService {
     // а если клан моложе окна — самый ранний. Каждый подзапрос — одна строка по индексу (clanId, at)
     const rows = await this.prisma.$queryRaw<RegionRow[]>`
       SELECT c."id", c."tag", c."name", c."alliance", c."level", c."memberCount", c."registrationTime",
-             COALESCE(d."memberCount", f."memberCount") AS d_members,
-             COALESCE(d."level", f."level") AS d_level, COALESCE(d."at", f."at") AS d_at,
-             COALESCE(w."memberCount", f."memberCount") AS w_members,
-             COALESCE(w."level", f."level") AS w_level, COALESCE(w."at", f."at") AS w_at
+             COALESCE(d."memberCount", f."memberCount") AS d_members, COALESCE(d."at", f."at") AS d_at,
+             COALESCE(w."memberCount", f."memberCount") AS w_members, COALESCE(w."at", f."at") AS w_at
       FROM "clans" c
       LEFT JOIN LATERAL (${lastBefore(dayAgo)}) d ON true
       LEFT JOIN LATERAL (${lastBefore(weekAgo)}) w ON true
       LEFT JOIN LATERAL (
-        SELECT s."memberCount", s."level", s."at" FROM "clan_snapshots" s
+        SELECT s."memberCount", s."at" FROM "clan_snapshots" s
         WHERE s."clanId" = c."id" ORDER BY s."at" ASC LIMIT 1
       ) f ON true
       WHERE c."region" = ${region} AND c."goneAt" IS NULL`;
@@ -145,18 +183,10 @@ export class ClanMetricsService {
       memberCount: r.memberCount,
       registrationTime: r.registrationTime?.getTime() ?? null,
       day: r.d_at
-        ? {
-            memberCount: r.d_members ?? 0,
-            level: r.d_level ?? 0,
-            at: r.d_at.getTime(),
-          }
+        ? { memberCount: r.d_members ?? 0, at: r.d_at.getTime() }
         : null,
       week: r.w_at
-        ? {
-            memberCount: r.w_members ?? 0,
-            level: r.w_level ?? 0,
-            at: r.w_at.getTime(),
-          }
+        ? { memberCount: r.w_members ?? 0, at: r.w_at.getTime() }
         : null,
     }));
 
