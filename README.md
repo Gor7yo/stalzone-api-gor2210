@@ -64,7 +64,7 @@ npx jest
 | `ADMIN_CHAT_IDS` | Telegram id админов через запятую - доступ к админке |
 | `TOKEN_ENCRYPTION_KEY` | 32 байта в base64 (`openssl rand -base64 32`) - шифрование токенов EXBO |
 | `COLLECTOR_ENABLED` | `false` - выключить сборщик |
-| `CLAN_SYNC_ENABLED` | `false` - не обновлять список кланов для поиска (по умолчанию раз в 6 ч, ~80 запросов на все регионы) |
+| `CLAN_SYNC_ENABLED` | `false` - не обновлять список кланов (поиск, список, история для метрик; по умолчанию раз в час, ~80 запросов на все регионы) |
 | `COLLECTOR_REGIONS` | регионы сборщика, по умолчанию `ru,eu` |
 | `EXBO_TOKENS_PER_MIN`, `EXBO_USER_RESERVE` | лимит EXBO и резерв для людей (по умолчанию 400 и 15 %) |
 
@@ -75,6 +75,8 @@ npx jest
 | `GET /api/auction/...`, `/api/character/...`, `/api/clan/...`, `/api/emission` | данные для сайта |
 | `GET /api/me`, `POST /api/me/trial` | статус Pro, пробный период |
 | `GET /api/clan/search?region=&q=` | поиск клана по названию, тегу, нику лидера (своя копия списка EXBO) |
+| `GET /api/clan/metrics?region=&id=&period=` (week, month, all) | динамика клана: бойцы за сутки/неделю/месяц, пик, место по численности, график |
+| `GET /api/clan/analytics?region=` | сводка по кланам региона: рост и отток бойцов, группировки, новые/распущенные, распределения |
 | `GET /api/flips?region=` | лента флиппера (Pro) |
 | `GET /api/sell/advice?region=&item=&quality=&upgrade=&amount=` | помощник продажи (Pro) |
 | `/api/alerts/*` | алерты цены, флипов и выброса |
@@ -92,7 +94,7 @@ npx jest
 src/
   api/          данные для сайта: аукцион, история за период, персонажи, кланы, выбросы
   collector/    сборщик аукциона и чтение лотов/продаж из БД; seed-items.json - список предметов
-  clans/        синхронизация списка кланов в БД и поиск по нему (pg_trgm)
+  clans/        синхронизация списка кланов раз в час (история в clan_snapshots), поиск (pg_trgm) и метрики
   flipper/      расчёт ленты флипов и помощник продажи
   telegram/     бот, алерты, привязка сайта, Pro, Tribute, админка, доступ и баны
   stalzone/     клиент STALZONE API (бюджет токенов) и OAuth EXBO

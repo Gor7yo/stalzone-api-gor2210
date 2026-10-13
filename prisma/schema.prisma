@@ -45,8 +45,8 @@ model StalzoneAccount {
   @@map("stalzone_accounts")
 }
 
-/// Клан из списка EXBO. Список целиком переписывает ClanSyncService (раз в несколько часов) —
-/// у EXBO нет поиска кланов, ищем по своей копии.
+/// Клан из списка EXBO. Список целиком переписывает ClansService (раз в час) —
+/// у EXBO нет поиска кланов и истории, ищем и считаем метрики по своей копии.
 model Clan {
   id     String @id
   region String
@@ -60,7 +60,8 @@ model Clan {
   alliance         String?
   registrationTime DateTime?
   description      String    @default("")
-  /// Место в рейтинге региона (порядок списка EXBO, с 1)
+  /// Позиция в выдаче EXBO (с 1). Это НЕ рейтинг — порядок списка EXBO случайный;
+  /// рейтинга кланов в API нет, сортируем сами по уровню и числу бойцов
   rank             Int       @default(0)
   /// Для поиска: без цветовых кодов, в нижнем регистре, ё → е
   tagKey           String    @default("")
@@ -69,10 +70,29 @@ model Clan {
   /// tagKey + nameKey + leaderKey одной строкой — на ней триграммный индекс (см. миграцию clan_search)
   searchKey        String    @default("")
   syncedAt         DateTime  @default(now())
+  /// Пропал из списка EXBO (распущен); null — живой. Через 90 дней строка удаляется
+  goneAt           DateTime?
 
   @@index([region, rank])
+  @@index([region, goneAt])
+  @@index([region, level(sort: Desc), memberCount(sort: Desc)])
   @@index([searchKey(ops: raw("gin_trgm_ops"))], type: Gin)
   @@map("clans")
+}
+
+/// История клана для метрик (бойцы, уровень). Пишет ClansService при синхронизации раз в час —
+/// только для нового клана и если изменились бойцы или уровень. Между снимками значения не менялись.
+/// Почасовые точки старше 14 дней сжимаются до последней точки дня.
+model ClanSnapshot {
+  clanId      String
+  at          DateTime
+  region      String
+  level       Int
+  memberCount Int
+
+  @@id([clanId, at])
+  @@index([region, at])
+  @@map("clan_snapshots")
 }
 
 // ---------- алерты в Telegram-боте ----------
@@ -121,18 +141,18 @@ model TelegramSubscriber {
   username  String?
 
   /// Регионы, о выбросах в которых присылать уведомление
-  emissionRegions String[] @default([])
+  emissionRegions String[]  @default([])
   /// Пользователь заблокировал бота — не шлём, пока снова не нажмёт /start
-  blocked Boolean @default(false)
+  blocked         Boolean   @default(false)
   /// Pro действует до этого момента; null или в прошлом — бесплатная версия
-  proUntil DateTime?
+  proUntil        DateTime?
   /// Когда взят пробный Pro (один раз на Telegram); null — ещё не брал
-  trialUsedAt DateTime?
+  trialUsedAt     DateTime?
   /// Бан от админа до этого момента (далёкое будущее — навсегда); null — нет
-  bannedUntil DateTime?
-  banReason   String?
+  bannedUntil     DateTime?
+  banReason       String?
   /// Последний визит в мини-приложение / на сайт (обновляется не чаще раза в 10 мин)
-  lastSeenAt  DateTime?
+  lastSeenAt      DateTime?
 
   createdAt   DateTime     @default(now())
   updatedAt   DateTime     @updatedAt
@@ -156,11 +176,11 @@ model PriceAlert {
   /// Выбранные качества: [2, 3] = Особый или Редкий; пусто — смотрим на quality
   qualities Int[] @default([])
   /// Один уровень заточки 0–15 (старые алерты; null — любая)
-  upgrade  Int?
+  upgrade   Int?
   /// Выбранные уровни заточки: [1, 5] или [5, 6, 7…]; пусто — смотрим на upgrade
-  upgrades Int[] @default([])
+  upgrades  Int[] @default([])
   /// Порог цены за штуку
-  maxPrice Int
+  maxPrice  Int
 
   /// Последний лот, о котором уже сообщили — чтобы не слать одно и то же каждую минуту
   lastLotKey     String?
@@ -183,11 +203,11 @@ model FlipAlert {
   /// Прибыль после комиссии не меньше (₽, весь лот)
   minProfit     Int
   /// И не меньше стольких % от выкупа
-  minPct        Int    @default(10)
+  minPct        Int      @default(10)
   /// low | medium | high — минимальная надёжность оценки
-  minConfidence String @default("medium")
+  minConfidence String   @default("medium")
   /// Выкуп лота не дороже; 0 — любой
-  maxBudget     Int    @default(0)
+  maxBudget     Int      @default(0)
   /// Категории предметов (artefact, weapon, armor…); пусто — любые
   groups        String[] @default([])
 
@@ -214,11 +234,11 @@ model AppState {
 /// Одноразовый код привязки сайта к Telegram: сайт создаёт → бот подтверждает → сайт забирает сессию.
 model TelegramLinkCode {
   /// sha256 от кода — сам код знает только браузер и ссылка t.me/<бот>?start=link_<код>
-  codeHash  String    @id
+  codeHash  String   @id
   /// Заполняется, когда пользователь подтвердил привязку в боте
   chatId    BigInt?
   expiresAt DateTime
-  createdAt DateTime  @default(now())
+  createdAt DateTime @default(now())
 
   @@map("telegram_link_codes")
 }
@@ -242,17 +262,17 @@ model WebSession {
 
 /// Сделка на аукционе. Продажи не меняются — сборщик только дописывает новые.
 model AuctionSale {
-  id       BigInt   @id @default(autoincrement())
-  region   String
-  itemId   String
-  time     DateTime
+  id      BigInt   @id @default(autoincrement())
+  region  String
+  itemId  String
+  time    DateTime
   /// Цена всей сделки (за amount штук)
-  price    BigInt
-  amount   Int
+  price   BigInt
+  amount  Int
   /// Качество 0–5; -1 — у предмета нет качества (не null: в уникальном ключе Postgres NULL ≠ NULL)
-  quality  Int      @default(-1)
+  quality Int      @default(-1)
   /// Заточка 0–15 (+0, если в лоте поля не было)
-  upgrade  Int      @default(0)
+  upgrade Int      @default(0)
 
   /// Одинаковые сделки в одну секунду считаем одной: у EXBO нет id сделки
   @@unique([region, itemId, time, price, amount, quality, upgrade], name: "sale_identity")
@@ -286,33 +306,33 @@ model AuctionLot {
 
 /// Предмет, который сборщик держит свежим. Частота зависит от ликвидности и интереса пользователей.
 model TrackedItem {
-  region   String
-  itemId   String
+  region String
+  itemId String
   /// seed — стартовый список, view — открывали на сайте, alert — стоит алерт
-  source   String   @default("seed")
+  source String @default("seed")
 
   /// Продаж в сутки (по накопленной истории) — от этого зависит частота
-  salesPerDay Float  @default(0)
+  salesPerDay Float     @default(0)
   /// Когда пользователь последний раз открывал предмет / пользовался алертом
   wantedAt    DateTime?
 
-  nextLotsAt  DateTime @default(now())
-  nextSalesAt DateTime @default(now())
+  nextLotsAt     DateTime  @default(now())
+  nextSalesAt    DateTime  @default(now())
   /// Быстрая проверка новых лотов (сначала свежие): раз в freshEverySec; null — не проверяем
-  freshEverySec Int?
-  nextFreshAt   DateTime @default(now())
+  freshEverySec  Int?
+  nextFreshAt    DateTime  @default(now())
   /// Флипов (сделок заметно ниже медианы) за неделю — по нему раздаётся freshEverySec
-  flipScore     Float    @default(0)
-  lastLotsAt  DateTime?
-  lastSalesAt DateTime?
+  flipScore      Float     @default(0)
+  lastLotsAt     DateTime?
+  lastSalesAt    DateTime?
   /// Смещение догрузки старой истории (страницами по 200); null — догружено
-  backfillOffset Int?   @default(0)
+  backfillOffset Int?      @default(0)
   /// С какого момента история продаж в БД полная (epoch — вся история EXBO); null — ещё догружается
-  historyFrom DateTime?
+  historyFrom    DateTime?
   /// Сколько лотов было на аукционе при последнем снимке (в снимке — не больше 200 самых дешёвых)
-  lotsTotal   Int?
-  failures    Int      @default(0)
-  lastError   String?
+  lotsTotal      Int?
+  failures       Int       @default(0)
+  lastError      String?
 
   createdAt DateTime @default(now())
 
