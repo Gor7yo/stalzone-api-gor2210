@@ -2,6 +2,17 @@
 
 export type Confidence = 'high' | 'medium' | 'low';
 
+/**
+ * Порог ленты: прибыль не меньше MIN_PROFIT и не меньше MIN_PCT % от выкупа.
+ * Мягкий — строже фильтрует сам пользователь (фильтры ленты и флип-алертов).
+ */
+export const MIN_PROFIT = 20_000;
+export const MIN_PCT = 5;
+/** Комиссия аукциона с продажи. */
+export const FEE = 0.05;
+/** Меньше стольких сделок за окно — цене не верим. */
+export const MIN_DEALS = 5;
+
 export interface Flip {
   /** Ключ лота (у EXBO нет id) — чтобы не сообщать об одном лоте дважды */
   key: string;

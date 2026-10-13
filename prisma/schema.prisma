@@ -278,6 +278,11 @@ model TrackedItem {
 
   nextLotsAt  DateTime @default(now())
   nextSalesAt DateTime @default(now())
+  /// Быстрая проверка новых лотов (сначала свежие): раз в freshEverySec; null — не проверяем
+  freshEverySec Int?
+  nextFreshAt   DateTime @default(now())
+  /// Флипов (сделок заметно ниже медианы) за неделю — по нему раздаётся freshEverySec
+  flipScore     Float    @default(0)
   lastLotsAt  DateTime?
   lastSalesAt DateTime?
   /// Смещение догрузки старой истории (страницами по 200); null — догружено
@@ -294,5 +299,6 @@ model TrackedItem {
   @@id([region, itemId])
   @@index([nextLotsAt])
   @@index([nextSalesAt])
+  @@index([nextFreshAt])
   @@map("tracked_items")
 }

@@ -2,23 +2,28 @@ import { Injectable } from '@nestjs/common';
 import { TtlCache } from 'src/common/cache/ttl-cache';
 import { SEED_ITEMS } from 'src/collector/seed-items';
 import { PrismaService } from 'src/prisma/prisma.service';
-import type { Confidence, Flip } from './flip-filter';
+import {
+  FEE,
+  MIN_DEALS,
+  MIN_PCT,
+  MIN_PROFIT,
+  type Confidence,
+  type Flip,
+} from './flip-filter';
 
 const MIN = 60_000;
 const DAY = 24 * 60 * MIN;
 /** Окно сделок для оценки цены продажи. */
 const WINDOW_DAYS = 7;
-/** Комиссия аукциона с продажи. */
-const FEE = 0.05;
-/** Меньше стольких сделок за окно — цене не верим. */
-const MIN_DEALS = 5;
 /** Лоты из снимков старше этого не показываем: их, скорее всего, уже выкупили. */
 const MAX_SNAPSHOT_AGE = 3 * 60 * MIN;
-/** Мусорные флипы: прибыль меньше этого или меньше MIN_PCT % от выкупа. */
-export const MIN_PROFIT = 50_000;
-export const MIN_PCT = 10;
-/** Лента пересчитывается не чаще раза в минуту на регион. */
-const TTL_MS = MIN;
+/**
+ * Лента пересчитывается не чаще раза в 15 с на регион: сборщик ловит новые лоты
+ * за секунды, минутный кеш съедал бы эту скорость.
+ */
+const TTL_MS = 15_000;
+/** Медианы по сделкам за неделю меняются медленно — их пересчитываем раз в 10 минут. */
+const PRICES_TTL_MS = 10 * MIN;
 
 export * from './flip-filter';
 
@@ -76,6 +81,7 @@ const iso = (d: Date) => new Date(d).toISOString().replace(/\.\d{3}Z$/, 'Z');
 @Injectable()
 export class FlipperService {
   private readonly cache = new TtlCache<FlipFeed>(10);
+  private readonly pricesCache = new TtlCache<Map<string, PriceRow>>(10);
 
   constructor(private readonly prisma: PrismaService) {}
 
@@ -83,13 +89,11 @@ export class FlipperService {
     return this.cache.getOrLoad(region, TTL_MS, () => this.compute(region));
   }
 
-  private async compute(region: string): Promise<FlipFeed> {
-    const now = new Date();
-    const since = new Date(now.getTime() - WINDOW_DAYS * DAY);
-    const freshSince = new Date(now.getTime() - MAX_SNAPSHOT_AGE);
-
-    // медианы за штуку: по точной заточке (bucket = 0–15) и по ступени (bucket = 100 + ступень)
-    const prices = await this.prisma.$queryRaw<PriceRow[]>`
+  /** Медианы за штуку: по точной заточке (bucket = 0–15) и по ступени (bucket = 100 + ступень). */
+  private prices(region: string) {
+    return this.pricesCache.getOrLoad(region, PRICES_TTL_MS, async () => {
+      const since = new Date(Date.now() - WINDOW_DAYS * DAY);
+      const rows = await this.prisma.$queryRaw<PriceRow[]>`
       WITH s AS (
         SELECT "itemId", "quality", "upgrade", "time",
                CASE WHEN "upgrade" <= 0 THEN 0 WHEN "upgrade" <= 4 THEN 1
@@ -108,15 +112,21 @@ export class FlipperService {
       FROM s
       GROUP BY GROUPING SETS (("itemId", "quality", "upgrade"), ("itemId", "quality", tier))
       HAVING count(*) >= ${MIN_DEALS}`;
+      return new Map(
+        rows.map((p) => [`${p.itemId}|${p.quality}|${p.bucket}`, p]),
+      );
+    });
+  }
 
-    const byKey = new Map(
-      prices.map((p) => [`${p.itemId}|${p.quality}|${p.bucket}`, p]),
-    );
+  private async compute(region: string): Promise<FlipFeed> {
+    const now = new Date();
+    const freshSince = new Date(now.getTime() - MAX_SNAPSHOT_AGE);
+    const byKey = await this.prices(region);
 
-    // лоты с выкупом из последних снимков сборщика
+    // лоты с выкупом из последнего снимка сборщика и быстрых проверок новых лотов
     const lots = await this.prisma.$queryRaw<LotRow[]>`
       SELECT l."itemId", l."quality", l."upgrade", l."amount", l."buyoutPrice",
-             l."endTime", t."lastLotsAt" AS "seenAt"
+             l."endTime", l."lastSeenAt" AS "seenAt"
       FROM "auction_lots" l
       JOIN "tracked_items" t ON t."region" = l."region" AND t."itemId" = l."itemId"
       WHERE l."region" = ${region} AND l."goneAt" IS NULL AND l."buyoutPrice" > 0

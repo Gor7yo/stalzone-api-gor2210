@@ -428,5 +428,40 @@
     "id": "l362",
     "name": "Контейнер «КРАБ-6»",
     "group": "containers"
+  },
+  {
+    "id": "ok3q0",
+    "name": "Бронескелет «Альбатрос-Перехватчик»",
+    "group": "armor"
+  },
+  {
+    "id": "lylnq",
+    "name": "HK MP7A2",
+    "group": "weapon"
+  },
+  {
+    "id": "j5op4",
+    "name": "K15",
+    "group": "weapon"
+  },
+  {
+    "id": "2ongl",
+    "name": "Cheytac M300",
+    "group": "weapon"
+  },
+  {
+    "id": "p63w4",
+    "name": "Derya MK-12 AS-103S",
+    "group": "weapon"
+  },
+  {
+    "id": "vj2mp",
+    "name": "KS-12 Komrad",
+    "group": "weapon"
+  },
+  {
+    "id": "7lng9",
+    "name": "FN Five-seveN",
+    "group": "weapon"
   }
 ]

@@ -17,6 +17,7 @@ import {
   type Priority,
 } from 'src/stalzone/api/token-budget';
 import type { Prisma, TrackedItem } from 'generated/prisma/client';
+import { FEE, MIN_DEALS, MIN_PCT, MIN_PROFIT } from 'src/flipper/flip-filter';
 import { SEED_ITEMS } from './seed-items';
 
 const MIN = 60_000;
@@ -31,10 +32,27 @@ const WANTED_MS = 30 * MIN;
 /** Как часто сборщик смотрит, нет ли просроченной задачи. */
 const TICK_MS = 1_000;
 /**
- * Сколько задач одновременно: EXBO отвечает 2–3 с, так что 6 потоков ≈ 140 запросов/мин —
- * под лимит 400 токенов (запрос аукциона = 2) за вычетом резерва для людей.
+ * Сколько задач одновременно: EXBO отвечает 2–3 с, так что 12 потоков могут сделать
+ * до ~280 запросов/мин — больше квоты; реальный предел ставит бюджет токенов (400/мин
+ * минус резерв для людей), а не потоки.
  */
-const CONCURRENCY = 6;
+const CONCURRENCY = 12;
+/**
+ * Быстрая проверка новых лотов (сортировка «сначала свежие»): интервал по тому, как часто
+ * у предмета случаются флипы. Места 1–10 — раз в 15 с, 11–35 — раз в 30 с, 36–60 — раз в 90 с,
+ * остальные — только полным снимком. Пересчёт — раз в час (prune).
+ * Бюджет: ~40 + 50 + 17 ≈ 107 запросов/мин; вместе с полными снимками и продажами
+ * (~45/мин) — в пределах квоты сборщика (~170 запросов/мин). Шире не делать: быстрые
+ * проверки берутся первыми и при перерасходе вытеснят снимки и продажи.
+ */
+const FRESH_TIERS = [
+  { top: 10, sec: 15 },
+  { top: 35, sec: 30 },
+  { top: 60, sec: 90 },
+];
+const FRESH_REST_SEC = 90;
+/** Если новые лоты проверяются быстро, полный снимок (все страницы) — раз в 5 минут. */
+const FULL_WITH_FRESH_MS = 5 * MIN;
 /** Бронь задачи на время выполнения: если процесс упадёт, через 2 мин её возьмут снова. */
 const LEASE_MS = 2 * MIN;
 /**
@@ -55,7 +73,14 @@ const EPOCH = new Date(0);
 
 type Sale = AuctionItemHistoryResponse['prices'][number];
 type Lot = AuctionItemLotsResponse['lots'][number];
-type Kind = (typeof ROTATION)[number];
+/** fresh — быстрая проверка новых лотов, всегда берётся первой. */
+type Kind = (typeof ROTATION)[number] | 'fresh';
+type DueKind = Exclude<Kind, 'backfill'>;
+const DUE_FIELD = {
+  lots: 'nextLotsAt',
+  sales: 'nextSalesAt',
+  fresh: 'nextFreshAt',
+} as const;
 type ItemKey = Pick<TrackedItem, 'region' | 'itemId'>;
 
 const qualityOf = (a?: Record<string, unknown>) =>
@@ -63,6 +88,34 @@ const qualityOf = (a?: Record<string, unknown>) =>
 const upgradeOf = (a?: Record<string, unknown>) =>
   typeof a?.ptn === 'number' ? a.ptn : 0;
 const keyOf = (item: ItemKey) => `${item.region}:${item.itemId}`;
+
+/** У EXBO нет id лота — узнаём его по моменту выставления и параметрам (как lot_identity в БД). */
+const lotKey = (l: {
+  startTime: Date;
+  amount: number;
+  startPrice: bigint;
+  buyoutPrice: bigint;
+  quality: number;
+  upgrade: number;
+}) =>
+  `${l.startTime.getTime()}|${l.amount}|${l.startPrice}|${l.buyoutPrice}|${l.quality}|${l.upgrade}`;
+
+/** Лот EXBO → строка auction_lots. */
+const lotRow = (item: ItemKey, l: Lot) => ({
+  region: item.region,
+  itemId: item.itemId,
+  startTime: new Date(l.startTime),
+  endTime: new Date(l.endTime),
+  amount: Number(l.amount) || 1,
+  startPrice: BigInt(Math.round(l.startPrice)),
+  currentPrice:
+    typeof l.currentPrice === 'number'
+      ? BigInt(Math.round(l.currentPrice))
+      : null,
+  buyoutPrice: BigInt(Math.round(l.buyoutPrice)),
+  quality: qualityOf(l.additional),
+  upgrade: upgradeOf(l.additional),
+});
 const where = (item: ItemKey) => ({
   region_itemId: { region: item.region, itemId: item.itemId },
 });
@@ -100,6 +153,9 @@ export class CollectorService
   private readonly stats = {
     startedAt: new Date(),
     lotsJobs: 0,
+    /** быстрые проверки новых лотов и сколько новых лотов они нашли */
+    freshJobs: 0,
+    freshNewLots: 0,
     salesJobs: 0,
     backfillJobs: 0,
     userRefreshes: 0,
@@ -154,6 +210,9 @@ export class CollectorService
    */
   private async prune() {
     await this.pruneGoneLots();
+    await this.rankFresh().catch((error: unknown) =>
+      this.logger.warn(`частота быстрых проверок: ${String(error)}`),
+    );
     const cutoff = new Date(Date.now() - FORGET_MS);
     // предметы под ценовыми алертами — из БД (this.alerted при старте ещё пуст)
     const alerts = await this.prisma.priceAlert
@@ -178,6 +237,69 @@ export class CollectorService
       });
     if (count)
       this.logger.log(`Сборщик: из списка выпало ${count} ненужных предметов`);
+  }
+
+  /**
+   * Где чаще всего бывают флипы: сделки за неделю, прошедшие с прибылью для перекупщика
+   * (по порогам ленты) относительно медианы тех же качества и заточки. Чем их больше,
+   * тем чаще проверяем новые лоты предмета (FRESH_TIERS).
+   */
+  private async rankFresh() {
+    const since = new Date(Date.now() - 7 * DAY);
+    const scores = await this.prisma.$queryRaw<
+      { region: string; itemId: string; score: number }[]
+    >`
+      WITH s AS (
+        SELECT "region", "itemId", "quality", "upgrade", "price", "amount",
+               "price"::float8 / GREATEST("amount", 1) AS unit
+        FROM "auction_sales" WHERE "time" >= ${since} AND "price" > 0
+      ),
+      m AS (
+        SELECT "region", "itemId", "quality", "upgrade",
+               percentile_cont(0.5) WITHIN GROUP (ORDER BY unit) AS med
+        FROM s GROUP BY 1, 2, 3, 4 HAVING count(*) >= ${MIN_DEALS}
+      )
+      SELECT s."region", s."itemId",
+             count(*) FILTER (
+               WHERE m.med * GREATEST(s."amount", 1) * ${1 - FEE} - s."price" >= ${MIN_PROFIT}
+                 AND (m.med * GREATEST(s."amount", 1) * ${1 - FEE} - s."price") / s."price" * 100 >= ${MIN_PCT}
+             )::float8 AS score
+      FROM s JOIN m USING ("region", "itemId", "quality", "upgrade")
+      GROUP BY 1, 2`;
+    const byKey = new Map(
+      scores.map((s) => [`${s.region}:${s.itemId}`, s.score]),
+    );
+
+    const items = await this.prisma.trackedItem.findMany({
+      select: {
+        region: true,
+        itemId: true,
+        salesPerDay: true,
+        freshEverySec: true,
+        flipScore: true,
+      },
+    });
+    const ranked = items
+      .map((i) => ({ ...i, score: byKey.get(keyOf(i)) ?? 0 }))
+      .sort((a, b) => b.score - a.score || b.salesPerDay - a.salesPerDay);
+    let changed = 0;
+    for (const [rank, i] of ranked.entries()) {
+      const tier = FRESH_TIERS.find((t) => rank < t.top);
+      const sec = i.score > 0 && tier ? tier.sec : null;
+      if (sec === i.freshEverySec && i.score === i.flipScore) continue;
+      changed++;
+      await this.prisma.trackedItem.update({
+        where: where(i),
+        data: { freshEverySec: sec, flipScore: i.score },
+      });
+    }
+    const fast = ranked.filter(
+      (i, r) => i.score > 0 && r < FRESH_TIERS[0].top,
+    ).length;
+    if (changed)
+      this.logger.log(
+        `Быстрая проверка лотов: ${fast} предметов раз в ${FRESH_TIERS[0].sec} с, обновлено ${changed}`,
+      );
   }
 
   /** Ушедшие с аукциона лоты (выкуплены/истекли) никто не читает — удаляем через GONE_LOTS_KEEP_MS. */
@@ -206,8 +328,12 @@ export class CollectorService
           : s >= 2
             ? { lots: 30 * MIN, sales: 45 * MIN }
             : { lots: 120 * MIN, sales: 180 * MIN };
+    // новые лоты ловит быстрая проверка — полный снимок нужен реже (отметить ушедшие)
+    const lots = item.freshEverySec
+      ? Math.max(base.lots, FULL_WITH_FRESH_MS)
+      : base.lots;
     return {
-      lots: wanted || this.alerted.has(keyOf(item)) ? 1 * MIN : base.lots,
+      lots: wanted || this.alerted.has(keyOf(item)) ? 1 * MIN : lots,
       sales: wanted ? 2 * MIN : base.sales,
     };
   }
@@ -331,7 +457,9 @@ export class CollectorService
    */
   private async claim(): Promise<{ item: TrackedItem; kind: Kind } | null> {
     this.turn = (this.turn + 1) % ROTATION.length;
-    const kinds = [
+    // новые лоты — первыми: от них зависит, успеет ли флиппер до покупателей
+    const kinds: Kind[] = [
+      'fresh',
       ...new Set([
         ...ROTATION.slice(this.turn),
         ...ROTATION.slice(0, this.turn),
@@ -362,14 +490,15 @@ export class CollectorService
    * Самая просроченная задача вида kind с «бронью»: срок сдвигается на LEASE_MS,
    * чтобы параллельный ход её не взял. Бронь снимается, когда задача отработает.
    */
-  private async claimDue(
-    kind: 'lots' | 'sales',
-    filter: Prisma.TrackedItemWhereInput,
-  ) {
+  private async claimDue(kind: DueKind, filter: Prisma.TrackedItemWhereInput) {
     const now = new Date();
-    const field = kind === 'lots' ? 'nextLotsAt' : 'nextSalesAt';
+    const field = DUE_FIELD[kind];
     const item = await this.prisma.trackedItem.findFirst({
-      where: { ...filter, [field]: { lte: now } },
+      where: {
+        ...filter,
+        [field]: { lte: now },
+        ...(kind === 'fresh' && { freshEverySec: { not: null } }),
+      },
       orderBy: { [field]: 'asc' },
     });
     if (!item) return null;
@@ -408,13 +537,15 @@ export class CollectorService
       }
       return;
     }
-    const field = kind === 'sales' ? 'nextSalesAt' : 'nextLotsAt';
+    const field = DUE_FIELD[kind];
     try {
       const key = `${kind}:${keyOf(item)}`;
       await this.once(key, () =>
         kind === 'sales'
           ? this.collectSales(item, 'background')
-          : this.collectLots(item, 'background'),
+          : kind === 'fresh'
+            ? this.collectFresh(item)
+            : this.collectLots(item, 'background'),
       );
     } catch (error) {
       if (error instanceof BudgetExhaustedError) {
@@ -550,6 +681,87 @@ export class CollectorService
    * Берём все лоты по возрастанию выкупа, страницами по 200 (до MAX_LOT_PAGES).
    * Лоты последнего снимка — те, у кого lastSeenAt = lastLotsAt предмета.
    */
+  /** Активные (не ушедшие) лоты предмета в БД. */
+  private activeLots(item: ItemKey) {
+    return this.prisma.auctionLot.findMany({
+      where: { region: item.region, itemId: item.itemId, goneAt: null },
+      select: {
+        id: true,
+        startTime: true,
+        amount: true,
+        startPrice: true,
+        buyoutPrice: true,
+        quality: true,
+        upgrade: true,
+        currentPrice: true,
+      },
+    });
+  }
+
+  /**
+   * Быстрая проверка новых лотов: одна страница «сначала свежие». Новый дешёвый лот
+   * попадает во флиппер через секунды после выставления, а не со следующим полным снимком.
+   * Заодно отмечает ушедшими лоты, которые выставлены позже самого старого из страницы,
+   * но в ней уже нет (их выкупили). Полный снимок (collectLots) — реже, он видит весь рынок.
+   */
+  private async collectFresh(item: TrackedItem) {
+    const res = await this.stalcraft.get<AuctionItemLotsResponse>(
+      [item.region, 'auction', item.itemId, 'lots'],
+      {
+        additional: 'true',
+        limit: PAGE,
+        offset: 0,
+        sort: 'time_created',
+        order: 'desc',
+      },
+      0,
+      'background',
+    );
+    this.stats.freshJobs++;
+    const now = new Date();
+    const seen = res.lots.map((l) => lotRow(item, l));
+    const seenKeys = new Set(seen.map(lotKey));
+    const active = await this.activeLots(item);
+    const activeKeys = new Set(active.map(lotKey));
+
+    // в странице — все лоты, выставленные начиная с самого старого из неё
+    // (или вообще все, если страница неполная)
+    const since =
+      res.lots.length < PAGE
+        ? new Date(0)
+        : new Date(Math.min(...seen.map((l) => l.startTime.getTime())));
+    const added = seen
+      .filter((l) => !activeKeys.has(lotKey(l)))
+      .map((l) => ({ ...l, firstSeenAt: now, lastSeenAt: now }));
+    const stillThere = active.filter((a) => seenKeys.has(lotKey(a)));
+    const gone = active.filter(
+      (a) => !seenKeys.has(lotKey(a)) && a.startTime >= since,
+    );
+    this.stats.freshNewLots += added.length;
+
+    await this.prisma.$transaction([
+      this.prisma.auctionLot.createMany({ data: added, skipDuplicates: true }),
+      this.prisma.auctionLot.updateMany({
+        where: { id: { in: stillThere.map((a) => a.id) } },
+        data: { lastSeenAt: now },
+      }),
+      this.prisma.auctionLot.updateMany({
+        where: { id: { in: gone.map((a) => a.id) } },
+        data: { goneAt: now },
+      }),
+      this.prisma.trackedItem.update({
+        where: where(item),
+        data: {
+          nextFreshAt: new Date(
+            now.getTime() + (item.freshEverySec ?? FRESH_REST_SEC) * 1000,
+          ),
+          failures: 0,
+          lastError: null,
+        },
+      }),
+    ]);
+  }
+
   private async collectLots(item: TrackedItem, priority: Priority) {
     const page = (offset: number) =>
       this.stalcraft.get<AuctionItemLotsResponse>(
@@ -579,45 +791,9 @@ export class CollectorService
     }
     this.stats.lotsJobs++;
     const now = new Date();
-    const key = (l: {
-      startTime: Date;
-      amount: number;
-      startPrice: bigint;
-      buyoutPrice: bigint;
-      quality: number;
-      upgrade: number;
-    }) =>
-      `${l.startTime.getTime()}|${l.amount}|${l.startPrice}|${l.buyoutPrice}|${l.quality}|${l.upgrade}`;
-
-    const seen = res.lots.map((l: Lot) => ({
-      region: item.region,
-      itemId: item.itemId,
-      startTime: new Date(l.startTime),
-      endTime: new Date(l.endTime),
-      amount: Number(l.amount) || 1,
-      startPrice: BigInt(Math.round(l.startPrice)),
-      currentPrice:
-        typeof l.currentPrice === 'number'
-          ? BigInt(Math.round(l.currentPrice))
-          : null,
-      buyoutPrice: BigInt(Math.round(l.buyoutPrice)),
-      quality: qualityOf(l.additional),
-      upgrade: upgradeOf(l.additional),
-    }));
-
-    const active = await this.prisma.auctionLot.findMany({
-      where: { region: item.region, itemId: item.itemId, goneAt: null },
-      select: {
-        id: true,
-        startTime: true,
-        amount: true,
-        startPrice: true,
-        buyoutPrice: true,
-        quality: true,
-        upgrade: true,
-        currentPrice: true,
-      },
-    });
+    const key = lotKey;
+    const seen = res.lots.map((l) => lotRow(item, l));
+    const active = await this.activeLots(item);
     const activeByKey = new Map(active.map((a) => [key(a), a]));
     // между запросами страниц лоты сдвигаются — один и тот же мог попасть дважды
     const seenKeys = new Set<string>();
