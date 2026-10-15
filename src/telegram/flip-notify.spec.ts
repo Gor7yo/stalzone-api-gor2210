@@ -100,7 +100,7 @@ describe('flipMessage', () => {
           variant: 'hip_spread_aff',
         }),
       ),
-    ).toBe('Оружейный модуль · Необычный «hip spread»');
+    ).toBe('Оружейный модуль · Необычный «Проектор»');
     const offers = Array.from({ length: 7 }, (_, i) => ({
       flip: flip({ itemId: `i${i}` }),
       lots: 1,
