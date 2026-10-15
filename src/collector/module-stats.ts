@@ -1,6 +1,6 @@
 /**
  * Русские названия ключевых характеристик оружейного модуля (id из EXBO → название в игре).
- * В базе EXBO их нет - справочник из игры; во фронте он же с эффектами (features/module-concepts.ts).
+ * В базе EXBO их нет - справочник из игры; во фронте он же с эффектами (features/module-attrs.ts).
  * Нет в списке - показываем id без служебного хвоста.
  */
 export const MODULE_STATS: Record<string, string> = {
@@ -14,20 +14,12 @@ export const MODULE_STATS: Record<string, string> = {
   recoil_aff: 'Держатель',
   horizontal_recoil_aff: 'Фиксатор',
   recoil_gain_aff: 'Седатор',
-  thermos: 'Термос',
-  finisher: 'Завершитель',
   ergonomics_aff: 'Биостабилизатор',
   shoot_factor_decrement_aff: 'Гаситель',
   wiggle_aff: 'Вариатор',
   draw_time_aff: 'Экстрактор',
   aiming_speed_modifier_aff: 'Оператор',
   equipped_speed_modifier_aff: 'Слайдер',
-  supressor: 'Компрессор',
-  decompressor: 'Декомпрессор',
-  executioner: 'Палач',
-  punch: 'Пробойник',
-  aggressor: 'Агрессор',
-  destroyer: 'Губитель',
 };
 
 /** «Снайпер» - в кавычках, как в игре */
