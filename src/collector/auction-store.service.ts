@@ -29,9 +29,11 @@ export interface LotsQuery {
 /** Как у EXBO: «2026-10-11T17:24:37Z», без миллисекунд (на этом формате держатся ключи лотов в алертах). */
 const iso = (d: Date) => d.toISOString().replace(/\.\d{3}Z$/, 'Z');
 
-const additionalOf = (quality: number, upgrade: number) => ({
+/** additional в формате EXBO; ключевая характеристика модуля - как у EXBO, атрибутом type 2. */
+const additionalOf = (quality: number, upgrade: number, variant: string) => ({
   ...(quality >= 0 && { qlt: quality }),
   ...(upgrade > 0 && { ptn: upgrade }),
+  ...(variant && { attributes: [{ type: 2, definitionId: variant }] }),
 });
 
 const SORT_KEY: Record<(typeof LOT_SORTS)[number], (l: AuctionLot) => number> =
@@ -109,7 +111,9 @@ export class AuctionStore {
       buyoutPrice: Number(l.buyoutPrice),
       startTime: iso(l.startTime),
       endTime: iso(l.endTime),
-      additional: additional ? additionalOf(l.quality, l.upgrade) : {},
+      additional: additional
+        ? additionalOf(l.quality, l.upgrade, l.variant)
+        : {},
     };
   }
 
@@ -184,6 +188,7 @@ export class AuctionStore {
       amount: number;
       quality: number;
       upgrade: number;
+      variant: string;
     };
     let rows: Row[];
     if (total <= MAX_POINTS) {
@@ -196,6 +201,7 @@ export class AuctionStore {
           amount: true,
           quality: true,
           upgrade: true,
+          variant: true,
         },
       });
     } else {
@@ -203,8 +209,8 @@ export class AuctionStore {
         (total - RECENT_POINTS) / (MAX_POINTS - RECENT_POINTS),
       );
       rows = await this.prisma.$queryRaw<Row[]>`
-        SELECT "time", "price", "amount", "quality", "upgrade" FROM (
-          SELECT "time", "price", "amount", "quality", "upgrade",
+        SELECT "time", "price", "amount", "quality", "upgrade", "variant" FROM (
+          SELECT "time", "price", "amount", "quality", "upgrade", "variant",
                  row_number() OVER (ORDER BY "time" DESC) AS rn
           FROM "auction_sales"
           WHERE "region" = ${region} AND "itemId" = ${itemId} AND "time" >= ${since}
@@ -219,7 +225,7 @@ export class AuctionStore {
         amount: Number(r.amount),
         price: Number(r.price),
         time: iso(new Date(r.time)),
-        additional: additionalOf(r.quality, r.upgrade),
+        additional: additionalOf(r.quality, r.upgrade, r.variant),
       })),
     };
   }

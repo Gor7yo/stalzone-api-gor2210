@@ -36,6 +36,7 @@ export interface FlipFeed {
 
 interface PriceRow {
   itemId: string;
+  variant: string;
   quality: number;
   bucket: number;
   n: number;
@@ -49,6 +50,7 @@ interface LotRow {
   itemId: string;
   quality: number;
   upgrade: number;
+  variant: string;
   amount: number;
   buyoutPrice: bigint;
   endTime: Date;
@@ -74,8 +76,10 @@ const iso = (d: Date) => new Date(d).toISOString().replace(/\.\d{3}Z$/, 'Z');
 /**
  * Флиппер: лоты, которые выгодно выкупить и перепродать.
  *
- * Цена продажи — медиана сделок за FLIP_WINDOW_DAYS дня с тем же качеством и заточкой;
- * если таких сделок мало — по ступени заточки. Прибыль = цена × количество × 0,95 − выкуп.
+ * Цена продажи — медиана сделок за FLIP_WINDOW_DAYS дня с тем же качеством, заточкой и
+ * вариантом (ключевая характеристика модуля); если таких сделок мало — по ступени заточки
+ * (вариант всегда точный: модули с разной характеристикой стоят несравнимо).
+ * Прибыль = цена × количество × 0,95 − выкуп.
  * Всё считается по нашей БД (сборщик), EXBO не трогаем.
  */
 @Injectable()
@@ -95,14 +99,14 @@ export class FlipperService {
       const since = new Date(Date.now() - WINDOW_DAYS * DAY);
       const rows = await this.prisma.$queryRaw<PriceRow[]>`
       WITH s AS (
-        SELECT "itemId", "quality", "upgrade", "time",
+        SELECT "itemId", "variant", "quality", "upgrade", "time",
                CASE WHEN "upgrade" <= 0 THEN 0 WHEN "upgrade" <= 4 THEN 1
                     WHEN "upgrade" <= 9 THEN 2 WHEN "upgrade" <= 14 THEN 3 ELSE 4 END AS tier,
                "price"::float8 / GREATEST("amount", 1) AS unit
         FROM "auction_sales"
         WHERE "region" = ${region} AND "time" >= ${since} AND "price" > 0
       )
-      SELECT "itemId", "quality",
+      SELECT "itemId", "variant", "quality",
              CASE WHEN GROUPING("upgrade") = 0 THEN "upgrade" ELSE 100 + tier END AS bucket,
              count(*)::int AS n,
              percentile_cont(0.5) WITHIN GROUP (ORDER BY unit) AS median,
@@ -110,10 +114,16 @@ export class FlipperService {
              percentile_cont(0.75) WITHIN GROUP (ORDER BY unit) AS p75,
              max("time") AS last
       FROM s
-      GROUP BY GROUPING SETS (("itemId", "quality", "upgrade"), ("itemId", "quality", tier))
+      GROUP BY GROUPING SETS (
+        ("itemId", "variant", "quality", "upgrade"),
+        ("itemId", "variant", "quality", tier)
+      )
       HAVING count(*) >= ${MIN_DEALS}`;
       return new Map(
-        rows.map((p) => [`${p.itemId}|${p.quality}|${p.bucket}`, p]),
+        rows.map((p) => [
+          `${p.itemId}|${p.variant}|${p.quality}|${p.bucket}`,
+          p,
+        ]),
       );
     });
   }
@@ -125,7 +135,7 @@ export class FlipperService {
 
     // лоты с выкупом из последнего снимка сборщика и быстрых проверок новых лотов
     const lots = await this.prisma.$queryRaw<LotRow[]>`
-      SELECT l."itemId", l."quality", l."upgrade", l."amount", l."buyoutPrice",
+      SELECT l."itemId", l."quality", l."upgrade", l."variant", l."amount", l."buyoutPrice",
              l."endTime", l."lastSeenAt" AS "seenAt"
       FROM "auction_lots" l
       JOIN "tracked_items" t ON t."region" = l."region" AND t."itemId" = l."itemId"
@@ -135,10 +145,9 @@ export class FlipperService {
 
     const flips: Flip[] = [];
     for (const lot of lots) {
-      const exact = byKey.get(`${lot.itemId}|${lot.quality}|${lot.upgrade}`);
-      const tier = byKey.get(
-        `${lot.itemId}|${lot.quality}|${100 + tierOf(lot.upgrade)}`,
-      );
+      const base = `${lot.itemId}|${lot.variant}|${lot.quality}`;
+      const exact = byKey.get(`${base}|${lot.upgrade}`);
+      const tier = byKey.get(`${base}|${100 + tierOf(lot.upgrade)}`);
       const basis: Flip['basis'] = exact ? 'exact' : 'tier';
       const p = exact ?? tier;
       if (!p) continue;
@@ -151,12 +160,13 @@ export class FlipperService {
 
       const seed = SEED_BY_ID.get(lot.itemId);
       flips.push({
-        key: `${lot.itemId}|${lot.quality}|${lot.upgrade}|${amount}|${buyout}|${lot.endTime.getTime()}`,
+        key: `${lot.itemId}|${lot.quality}|${lot.upgrade}|${amount}|${buyout}|${lot.endTime.getTime()}${lot.variant ? `|${lot.variant}` : ''}`,
         itemId: lot.itemId,
         name: seed?.name,
         group: seed?.group,
         quality: lot.quality,
         upgrade: lot.upgrade,
+        ...(lot.variant && { variant: lot.variant }),
         amount,
         buyout,
         unitPrice: Math.round(buyout / amount),

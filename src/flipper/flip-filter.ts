@@ -28,6 +28,8 @@ export interface Flip {
   /** -1 — у предмета нет качества */
   quality: number;
   upgrade: number;
+  /** Ключевая характеристика модуля (marksman, sadist…); нет — у предмета вариантов нет */
+  variant?: string;
   amount: number;
   /** Выкуп всего лота */
   buyout: number;

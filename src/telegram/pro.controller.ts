@@ -41,6 +41,13 @@ class SellQueryDto extends FlipsQueryDto {
   @Max(15)
   upgrade?: number;
 
+  /** Ключевая характеристика модуля (marksman, sadist…) */
+  @IsOptional()
+  @Matches(/^[a-z0-9_]{1,64}$/, {
+    message: 'variant: некорректная характеристика',
+  })
+  variant?: string;
+
   /** Сколько штук продаём одним лотом */
   @IsOptional()
   @Type(() => Number)
@@ -97,6 +104,7 @@ export class SellController {
       itemId: query.item,
       quality: query.quality ?? -1,
       upgrade: query.upgrade ?? 0,
+      variant: query.variant ?? '',
       amount: query.amount ?? 1,
     });
   }

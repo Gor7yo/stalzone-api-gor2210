@@ -333,9 +333,11 @@ model AuctionSale {
   quality Int      @default(-1)
   /// Заточка 0–15 (+0, если в лоте поля не было)
   upgrade Int      @default(0)
+  /// Ключевая характеристика модуля (definitionId атрибута type 2: marksman, sadist…); "" — нет
+  variant String   @default("")
 
   /// Одинаковые сделки в одну секунду считаем одной: у EXBO нет id сделки
-  @@unique([region, itemId, time, price, amount, quality, upgrade], name: "sale_identity")
+  @@unique([region, itemId, time, price, amount, quality, upgrade, variant], name: "sale_identity")
   @@index([region, itemId, time(sort: Desc)])
   @@map("auction_sales")
 }
@@ -354,12 +356,14 @@ model AuctionLot {
   /// -1 — без качества (см. AuctionSale.quality)
   quality      Int       @default(-1)
   upgrade      Int       @default(0)
+  /// Ключевая характеристика модуля (см. AuctionSale.variant)
+  variant      String    @default("")
   firstSeenAt  DateTime  @default(now())
   lastSeenAt   DateTime  @default(now())
   goneAt       DateTime?
 
   /// У EXBO нет id лота — узнаём его по моменту выставления и параметрам
-  @@unique([region, itemId, startTime, amount, startPrice, buyoutPrice, quality, upgrade], name: "lot_identity")
+  @@unique([region, itemId, startTime, amount, startPrice, buyoutPrice, quality, upgrade, variant], name: "lot_identity")
   @@index([region, itemId, goneAt])
   @@map("auction_lots")
 }

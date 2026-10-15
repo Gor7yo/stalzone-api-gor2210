@@ -1,6 +1,7 @@
 import { Injectable, Logger } from '@nestjs/common';
 import { AuctionStore } from 'src/collector/auction-store.service';
 import { CollectorService } from 'src/collector/collector.service';
+import { variantOf } from 'src/collector/variant';
 import { StalcraftApiClient } from 'src/stalzone/api/stalcraft-api.client';
 import type { AuctionItemHistoryResponse } from './api.constants';
 import type { HistoryPeriod, HistoryPeriodQueryDto } from './dto/queries.dto';
@@ -47,12 +48,14 @@ export interface HistoryPeriodResponse {
 
 const time = (s: Sale) => new Date(s.time).getTime();
 
-/** Оставляем только то, что нужно приложению: качество и заточку. */
+/** Оставляем только то, что нужно приложению: качество, заточку и ключевую характеристику модуля. */
 const compact = (s: Sale): Sale => {
   const a = s.additional ?? {};
-  const additional: Record<string, number> = {};
+  const additional: Record<string, unknown> = {};
   if (typeof a.qlt === 'number') additional.qlt = a.qlt;
   if (typeof a.ptn === 'number') additional.ptn = a.ptn;
+  const variant = variantOf(a);
+  if (variant) additional.attributes = [{ type: 2, definitionId: variant }];
   return { amount: s.amount, price: s.price, time: s.time, additional };
 };
 

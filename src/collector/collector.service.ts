@@ -25,6 +25,7 @@ import {
   MIN_PROFIT,
 } from 'src/flipper/flip-filter';
 import { SEED_ITEMS } from './seed-items';
+import { variantOf } from './variant';
 
 const MIN = 60_000;
 const DAY = 24 * 60 * MIN;
@@ -103,8 +104,9 @@ const lotKey = (l: {
   buyoutPrice: bigint;
   quality: number;
   upgrade: number;
+  variant: string;
 }) =>
-  `${l.startTime.getTime()}|${l.amount}|${l.startPrice}|${l.buyoutPrice}|${l.quality}|${l.upgrade}`;
+  `${l.startTime.getTime()}|${l.amount}|${l.startPrice}|${l.buyoutPrice}|${l.quality}|${l.upgrade}|${l.variant}`;
 
 /** Лот EXBO → строка auction_lots. */
 const lotRow = (item: ItemKey, l: Lot) => ({
@@ -121,6 +123,7 @@ const lotRow = (item: ItemKey, l: Lot) => ({
   buyoutPrice: BigInt(Math.round(l.buyoutPrice)),
   quality: qualityOf(l.additional),
   upgrade: upgradeOf(l.additional),
+  variant: variantOf(l.additional),
 });
 const where = (item: ItemKey) => ({
   region_itemId: { region: item.region, itemId: item.itemId },
@@ -256,21 +259,21 @@ export class CollectorService
       { region: string; itemId: string; score: number }[]
     >`
       WITH s AS (
-        SELECT "region", "itemId", "quality", "upgrade", "price", "amount",
+        SELECT "region", "itemId", "quality", "upgrade", "variant", "price", "amount",
                "price"::float8 / GREATEST("amount", 1) AS unit
         FROM "auction_sales" WHERE "time" >= ${since} AND "price" > 0
       ),
       m AS (
-        SELECT "region", "itemId", "quality", "upgrade",
+        SELECT "region", "itemId", "quality", "upgrade", "variant",
                percentile_cont(0.5) WITHIN GROUP (ORDER BY unit) AS med
-        FROM s GROUP BY 1, 2, 3, 4 HAVING count(*) >= ${MIN_DEALS}
+        FROM s GROUP BY 1, 2, 3, 4, 5 HAVING count(*) >= ${MIN_DEALS}
       )
       SELECT s."region", s."itemId",
              count(*) FILTER (
                WHERE m.med * GREATEST(s."amount", 1) * ${1 - FEE} - s."price" >= ${MIN_PROFIT}
                  AND (m.med * GREATEST(s."amount", 1) * ${1 - FEE} - s."price") / s."price" * 100 >= ${MIN_PCT}
              )::float8 AS score
-      FROM s JOIN m USING ("region", "itemId", "quality", "upgrade")
+      FROM s JOIN m USING ("region", "itemId", "quality", "upgrade", "variant")
       GROUP BY 1, 2`;
     const byKey = new Map(
       scores.map((s) => [`${s.region}:${s.itemId}`, s.score]),
@@ -602,6 +605,7 @@ export class CollectorService
         amount: Number(s.amount) || 1,
         quality: qualityOf(s.additional),
         upgrade: upgradeOf(s.additional),
+        variant: variantOf(s.additional),
       })),
       skipDuplicates: true,
     });
@@ -699,6 +703,7 @@ export class CollectorService
         buyoutPrice: true,
         quality: true,
         upgrade: true,
+        variant: true,
         currentPrice: true,
       },
     });

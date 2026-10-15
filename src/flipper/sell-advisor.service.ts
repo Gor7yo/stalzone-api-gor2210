@@ -41,6 +41,8 @@ export interface SellQuery {
   /** -1 — у предмета нет качества */
   quality: number;
   upgrade: number;
+  /** Ключевая характеристика модуля; "" — у предмета вариантов нет */
+  variant: string;
   /** Сколько штук продаём одним лотом */
   amount: number;
 }
@@ -56,6 +58,7 @@ export interface SellAdvice {
   itemId: string;
   quality: number;
   upgrade: number;
+  variant: string;
   amount: number;
   updatedAt: string;
   /** exact — сделки с той же заточкой, tier — со ступенью заточки (точных мало) */
@@ -102,7 +105,8 @@ interface LotRow {
 
 /**
  * Помощник продажи (Pro): по какой цене выставить лот, чтобы он ушёл за N часов.
- * Позиция — предмет + качество + заточка (сделок мало — ступень заточки).
+ * Позиция — предмет + качество + заточка + вариант (ключевая характеристика модуля);
+ * сделок мало — ступень заточки, вариант всегда точный.
  * Считает по БД сборщика: скорость сделок за окно и очередь лотов дешевле (sell-estimate.ts).
  */
 @Injectable()
@@ -116,12 +120,12 @@ export class SellAdvisorService {
   ) {}
 
   advise(q: SellQuery) {
-    const key = `${q.region}|${q.itemId}|${q.quality}|${q.upgrade}|${q.amount}`;
+    const key = `${q.region}|${q.itemId}|${q.quality}|${q.upgrade}|${q.variant}|${q.amount}`;
     return this.cache.getOrLoad(key, TTL_MS, () => this.compute(q));
   }
 
   private async compute(q: SellQuery): Promise<SellAdvice> {
-    const { region, itemId, quality, upgrade, amount } = q;
+    const { region, itemId, quality, upgrade, variant, amount } = q;
     await this.collector.touch(region, itemId, 'view');
     let tracked = await this.prisma.trackedItem.findUnique({
       where: { region_itemId: { region, itemId } },
@@ -156,6 +160,7 @@ export class SellAdvisorService {
                "price"::float8 / GREATEST("amount", 1) AS unit, "time"
         FROM "auction_sales"
         WHERE "region" = ${region} AND "itemId" = ${itemId} AND "quality" = ${quality}
+          AND "variant" = ${variant}
           AND "upgrade" BETWEEN ${lo} AND ${hi} AND "time" >= ${from} AND "price" > 0
       )
       SELECT count(*) FILTER (WHERE exact)::int AS e_n,
@@ -191,6 +196,7 @@ export class SellAdvisorService {
       FROM "auction_lots" l
       JOIN "tracked_items" t ON t."region" = l."region" AND t."itemId" = l."itemId"
       WHERE l."region" = ${region} AND l."itemId" = ${itemId} AND l."quality" = ${quality}
+        AND l."variant" = ${variant}
         AND l."upgrade" BETWEEN ${lotsFrom} AND ${lotsTo}
         AND l."goneAt" IS NULL AND l."buyoutPrice" > 0
         AND l."lastSeenAt" >= t."lastLotsAt" AND l."endTime" > ${now}`;
@@ -224,6 +230,7 @@ export class SellAdvisorService {
       itemId,
       quality,
       upgrade,
+      variant,
       amount,
       updatedAt: now.toISOString(),
       basis,

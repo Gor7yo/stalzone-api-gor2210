@@ -90,6 +90,17 @@ describe('flipMessage', () => {
     expect(flipTitle(flip({ quality: -1, upgrade: 0, name: undefined }))).toBe(
       'Предмет 4lrn',
     );
+    // модуль: вместо заточки - ключевая характеристика в кавычках
+    expect(
+      flipTitle(
+        flip({
+          name: 'Оружейный модуль',
+          quality: 1,
+          upgrade: 0,
+          variant: 'hip_spread_aff',
+        }),
+      ),
+    ).toBe('Оружейный модуль · Необычный «hip spread»');
     const offers = Array.from({ length: 7 }, (_, i) => ({
       flip: flip({ itemId: `i${i}` }),
       lots: 1,

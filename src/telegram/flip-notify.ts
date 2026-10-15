@@ -6,6 +6,7 @@ import {
   FLIP_WINDOW_DAYS,
   matchesFlip,
 } from '../flipper/flip-filter';
+import { variantLabel } from '../collector/module-stats';
 import { escapeHtml, formatShort, QUALITY_LABEL, REGION_LABEL } from './format';
 
 /** О лоте из снимка старше этого не сообщаем: его, скорее всего, уже выкупили. */
@@ -38,7 +39,7 @@ export function pickNewFlips(
   );
   const best = new Map<string, { flip: Flip; lots: number }>();
   for (const f of fresh) {
-    const variant = `${f.itemId}|${f.quality}|${f.upgrade}`;
+    const variant = `${f.itemId}|${f.quality}|${f.upgrade}|${f.variant ?? ''}`;
     const cur = best.get(variant);
     if (!cur) best.set(variant, { flip: f, lots: 1 });
     else {
@@ -52,11 +53,15 @@ export function pickNewFlips(
   };
 }
 
-/** «Висмут · Редкий +15» */
+/** «Висмут · Редкий +15», «Оружейный модуль · Редкий «Снайпер»» */
 export function flipTitle(f: Flip) {
   const variant = [
     f.quality >= 0 ? QUALITY_LABEL[f.quality] : null,
-    f.upgrade > 0 || f.quality >= 0 ? `+${f.upgrade}` : null,
+    f.variant
+      ? variantLabel(f.variant)
+      : f.upgrade > 0 || f.quality >= 0
+        ? `+${f.upgrade}`
+        : null,
     f.amount > 1 ? `×${f.amount}` : null,
   ]
     .filter(Boolean)
