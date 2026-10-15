@@ -1,4 +1,5 @@
 import type { Region } from 'src/api/dto/queries.dto';
+import { variantLabel } from '../collector/module-stats';
 
 export const REGION_LABEL: Record<Region, string> = {
   ru: 'RU',
@@ -45,14 +46,18 @@ export function upgradesLabel(levels: number[]) {
   return runs.map(([a, b]) => (a === b ? `+${a}` : `+${a}…+${b}`)).join(', ');
 }
 
-/** «Комета · Легендарный +10», «Комета · Особый, Редкий +1, +5…+7» */
+/** «Комета · Легендарный +10», «Комета · Особый, Редкий +1, +5…+7», «Модуль «Снайпер» · Редкий» */
 export function alertTitle(a: {
   itemName: string;
   quality: number | null;
   qualities?: number[];
   upgrade: number | null;
   upgrades?: number[];
+  variant?: string;
 }) {
+  const name = a.variant
+    ? `${a.itemName} ${variantLabel(a.variant)}`
+    : a.itemName;
   const qualities = a.qualities?.length
     ? a.qualities
     : a.quality !== null
@@ -68,7 +73,7 @@ export function alertTitle(a: {
       : [];
   const upgrade = levels.length ? upgradesLabel(levels) : null;
   const variant = [quality, upgrade].filter(Boolean).join(' ');
-  return variant ? `${a.itemName} · ${variant}` : a.itemName;
+  return variant ? `${name} · ${variant}` : name;
 }
 
 /** Диплинк t.me/<bot>/<app>?startapp=<путь в base64url> — формат как во фронтенде (lib/telegram.ts). */

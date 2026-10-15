@@ -237,6 +237,8 @@ model PriceAlert {
   upgrade   Int?
   /// Выбранные уровни заточки: [1, 5] или [5, 6, 7…]; пусто — смотрим на upgrade
   upgrades  Int[] @default([])
+  /// Ключевая характеристика модуля (marksman, sadist…); "" - любая
+  variant   String @default("")
   /// Порог цены за штуку
   maxPrice  Int
 

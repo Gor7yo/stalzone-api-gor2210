@@ -279,7 +279,10 @@ export class AlertsWatcher implements OnApplicationBootstrap, OnModuleDestroy {
             ? `${lot.amount} шт. · выкуп ${formatPrice(lot.buyoutPrice)}`
             : `Выкуп ${formatPrice(lot.buyoutPrice)}`,
         ];
-        const link = deepLink(this.appUrl, `/auction/${itemId}`);
+        const link = deepLink(
+          this.appUrl,
+          `/auction/${itemId}${alert.variant ? `?v=${alert.variant}` : ''}`,
+        );
         const buttons: InlineButton[][] = [
           [
             ...(link ? [{ text: 'Открыть предмет', url: link }] : []),

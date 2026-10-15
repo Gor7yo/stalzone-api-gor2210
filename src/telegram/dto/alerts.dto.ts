@@ -62,6 +62,13 @@ export class CreatePriceAlertDto {
   @Max(15, { each: true })
   upgrades?: number[];
 
+  /** Ключевая характеристика модуля (marksman, sadist…); нет - любая */
+  @IsOptional()
+  @Matches(/^[a-z0-9_]{1,64}$/, {
+    message: 'variant: некорректная характеристика',
+  })
+  variant?: string;
+
   /** Порог цены за штуку */
   @Type(() => Number)
   @IsInt()

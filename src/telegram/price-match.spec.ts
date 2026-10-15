@@ -72,6 +72,22 @@ describe('decide', () => {
     });
   });
 
+  it('характеристика модуля: ловит только лоты с ней, пустая — любые', () => {
+    const mod = (price: number, id: string) =>
+      lot(price, { qlt: 3, attributes: [{ type: 2, definitionId: id }] });
+    const modules = [mod(1_000_000, 'aiming_speed'), mod(4_000_000, 'sadist')];
+    expect(decide(modules, alert({ variant: 'sadist' }))).toMatchObject({
+      action: 'notify',
+      lot: { buyoutPrice: 4_000_000 },
+    });
+    expect(decide(modules, alert({ variant: 'marksman' }))).toEqual({
+      action: 'none',
+    });
+    expect(decide(modules, alert({ variant: '' }))).toMatchObject({
+      lot: { buyoutPrice: 1_000_000 },
+    });
+  });
+
   it('считает цену за штуку', () => {
     const r = decide([lot(9_000_000, {}, 3)], alert({ maxPrice: 3_000_000 }));
     expect(r).toMatchObject({ action: 'notify' });

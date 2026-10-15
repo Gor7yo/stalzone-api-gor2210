@@ -1,4 +1,5 @@
 import type { AuctionItemLotsResponse } from 'src/api/api.constants';
+import { variantOf } from '../collector/variant';
 
 type Lot = AuctionItemLotsResponse['lots'][number];
 
@@ -11,6 +12,8 @@ export interface AlertCriteria {
   upgrade: number | null;
   /** Набор уровней заточки; если не пуст — главнее upgrade */
   upgrades?: number[];
+  /** Ключевая характеристика модуля; пусто — любая */
+  variant?: string;
   maxPrice: number;
   lastLotKey: string | null;
   lastNotifiedAt: Date | null;
@@ -33,7 +36,7 @@ export const lotKey = (lot: Lot) =>
   `${lot.startTime}|${lot.buyoutPrice}|${lot.amount}|${unitPrice(lot)}`;
 const priceFromKey = (key: string) => Number(key.split('|')[3]);
 
-/** Самый дешёвый (за штуку) лот с выкупом, подходящий под качество и заточку алерта. */
+/** Самый дешёвый (за штуку) лот с выкупом, подходящий под качество, заточку и характеристику алерта. */
 export function cheapestMatching(lots: Lot[], alert: AlertCriteria) {
   let best: Lot | null = null;
   for (const lot of lots) {
@@ -47,6 +50,7 @@ export function cheapestMatching(lots: Lot[], alert: AlertCriteria) {
     if (alert.upgrades?.length) {
       if (!alert.upgrades.includes(u)) continue;
     } else if (alert.upgrade !== null && u !== alert.upgrade) continue;
+    if (alert.variant && variantOf(lot.additional) !== alert.variant) continue;
     if (!best || price < unitPrice(best)) best = lot;
   }
   return best;

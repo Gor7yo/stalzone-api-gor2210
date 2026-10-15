@@ -33,6 +33,7 @@ const publicAlert = {
   qualities: true,
   upgrade: true,
   upgrades: true,
+  variant: true,
   maxPrice: true,
   lastNotifiedAt: true,
   createdAt: true,
@@ -140,6 +141,8 @@ export class AlertsService {
         qualities,
         upgrade: upgrades.length ? null : (dto.upgrade ?? null),
         upgrades,
+        // характеристику модуля можно и без Pro: без неё цены разных модулей вперемешку
+        variant: dto.variant ?? '',
         maxPrice: dto.maxPrice,
       },
       select: publicAlert,
