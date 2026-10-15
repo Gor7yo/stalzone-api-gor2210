@@ -6,7 +6,7 @@ import type {
 import type { LOT_SORTS } from 'src/api/dto/queries.dto';
 import { PrismaService } from 'src/prisma/prisma.service';
 import type { AuctionLot, TrackedItem } from 'generated/prisma/client';
-import { CollectorService, MAX_LOT_PAGES, PAGE } from './collector.service';
+import { CollectorService, lotPagesOf, PAGE } from './collector.service';
 
 type Lot = AuctionItemLotsResponse['lots'][number];
 type Sale = AuctionItemHistoryResponse['prices'][number];
@@ -93,8 +93,8 @@ export class AuctionStore {
       },
       orderBy: [{ buyoutPrice: 'asc' }, { startTime: 'asc' }],
     });
-    // в снимке все лоты аукциона или только самые дешёвые (если лотов больше MAX_LOT_PAGES страниц)
-    const complete = (item.lotsTotal ?? 0) <= MAX_LOT_PAGES * PAGE;
+    // в снимке все лоты аукциона или только самые дешёвые (если лотов больше lotPagesOf страниц)
+    const complete = (item.lotsTotal ?? 0) <= lotPagesOf(itemId) * PAGE;
     return {
       lots,
       complete,
@@ -112,7 +112,11 @@ export class AuctionStore {
       startTime: iso(l.startTime),
       endTime: iso(l.endTime),
       additional: additional
-        ? additionalOf(l.quality, l.upgrade, l.variant)
+        ? {
+            ...additionalOf(l.quality, l.upgrade, l.variant),
+            // все три атрибута модуля с quality и statsRandom, как у EXBO
+            ...(Array.isArray(l.attributes) && { attributes: l.attributes }),
+          }
         : {},
     };
   }

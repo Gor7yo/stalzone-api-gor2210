@@ -15,6 +15,7 @@ import {
   ClanInfoQueryDto,
   ClanListQueryDto,
   EmissionQueryDto,
+  EXBO_PAGE_MAX,
 } from './dto/queries.dto';
 
 /** Сколько живёт ответ в кеше сервера (мс). Лоты меняются часто, кланы — редко. */
@@ -73,7 +74,7 @@ export class ApiService {
       [q.region, 'auction', q.item, 'lots'],
       {
         additional: q.additional ?? 'false',
-        limit: q.limit ?? 20,
+        limit: Math.min(q.limit ?? 20, EXBO_PAGE_MAX),
         offset: q.offset ?? 0,
         sort: q.sort,
         order: q.order,
@@ -87,7 +88,7 @@ export class ApiService {
       [q.region, 'auction', q.item, 'history'],
       {
         additional: q.additional ?? 'false',
-        limit: q.limit ?? 20,
+        limit: Math.min(q.limit ?? 20, EXBO_PAGE_MAX),
         offset: q.offset ?? 0,
       },
       TTL.history,

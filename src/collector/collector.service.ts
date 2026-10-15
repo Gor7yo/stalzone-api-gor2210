@@ -25,13 +25,20 @@ import {
   MIN_PROFIT,
 } from 'src/flipper/flip-filter';
 import { SEED_ITEMS } from './seed-items';
-import { variantOf } from './variant';
+import { attributesOf, variantOf } from './variant';
 
 const MIN = 60_000;
 const DAY = 24 * 60 * MIN;
 export const PAGE = 200;
-/** Снимок лотов — до стольких страниц: больше 1000 лотов на одном предмете не бывает на практике. */
+/** Снимок лотов — до стольких страниц: больше 1000 лотов на одном предмете обычно не бывает. */
 export const MAX_LOT_PAGES = 5;
+/**
+ * Исключение — оружейный модуль: ~4 тыс. лотов, редкие с нужной характеристикой — в самом конце
+ * по цене. Снимаем рынок целиком (25 страниц ≈ 6% минутной квоты EXBO), чтобы сайт брал всё из БД.
+ */
+const LOT_PAGES: Record<string, number> = { '1pyq': 25 };
+export const lotPagesOf = (itemId: string) =>
+  LOT_PAGES[itemId] ?? MAX_LOT_PAGES;
 /** Как далеко назад догружаем историю для нового предмета. */
 const BACKFILL_DAYS = 30;
 /** Предмет «нужен», пока его открывали или трогали алерт не дольше этого. */
@@ -124,6 +131,8 @@ const lotRow = (item: ItemKey, l: Lot) => ({
   quality: qualityOf(l.additional),
   upgrade: upgradeOf(l.additional),
   variant: variantOf(l.additional),
+  attributes: (attributesOf(l.additional) ?? undefined) as
+    Prisma.InputJsonValue | undefined,
 });
 const where = (item: ItemKey) => ({
   region_itemId: { region: item.region, itemId: item.itemId },
@@ -705,6 +714,7 @@ export class CollectorService
         upgrade: true,
         variant: true,
         currentPrice: true,
+        attributes: true,
       },
     });
   }
@@ -793,7 +803,7 @@ export class CollectorService
     const res = { total: first.total, lots: [...first.lots] };
     for (
       let offset = PAGE;
-      offset < Math.min(first.total, MAX_LOT_PAGES * PAGE);
+      offset < Math.min(first.total, lotPagesOf(item.itemId) * PAGE);
       offset += PAGE
     ) {
       const next = await page(offset);
@@ -820,7 +830,7 @@ export class CollectorService
     const stillThere = active.filter((a) => seenKeys.has(key(a)));
     // пропавшим считаем только лот, который точно попал бы в снимок:
     // снимок полный (сняты все страницы) или лот дешевле самого дорогого из полученных
-    const complete = res.total <= MAX_LOT_PAGES * PAGE;
+    const complete = res.total <= lotPagesOf(item.itemId) * PAGE;
     const maxBuyout = seen.reduce(
       (m, l) => (l.buyoutPrice > m ? l.buyoutPrice : m),
       0n,
@@ -851,6 +861,18 @@ export class CollectorService
           this.prisma.auctionLot.updateMany({
             where: { id: activeByKey.get(key(l))!.id },
             data: { currentPrice: l.currentPrice },
+          }),
+        ),
+      // атрибуты модуля у лотов, записанных до колонки attributes, - дописываем один раз
+      ...seen
+        .filter((l) => {
+          const a = activeByKey.get(key(l));
+          return a && a.attributes === null && l.attributes !== undefined;
+        })
+        .map((l) =>
+          this.prisma.auctionLot.updateMany({
+            where: { id: activeByKey.get(key(l))!.id },
+            data: { attributes: l.attributes },
           }),
         ),
       // лоты, у которых истекло время, — ушли в любом случае

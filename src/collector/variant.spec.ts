@@ -1,4 +1,51 @@
-import { variantOf } from './variant';
+import { attributesOf, variantOf } from './variant';
+
+describe('attributesOf', () => {
+  it('сохраняет три атрибута модуля с quality и statsRandom, без лишних полей', () => {
+    expect(
+      attributesOf({
+        qlt: 3,
+        attributes: [
+          {
+            type: 2,
+            statsRandom: 2.4077475,
+            definitionId: 'marksman',
+            quality: 3,
+            x: 1,
+          },
+          {
+            type: 1,
+            statsRandom: 1.6996375,
+            definitionId: 'shoot_factor_decrement_suf',
+            quality: 2,
+          },
+          {
+            statsRandom: -0.128271,
+            definitionId: 'hip_spread_pre',
+            quality: 2,
+          },
+        ],
+      }),
+    ).toEqual([
+      { type: 2, statsRandom: 2.4077475, definitionId: 'marksman', quality: 3 },
+      {
+        type: 1,
+        statsRandom: 1.6996375,
+        definitionId: 'shoot_factor_decrement_suf',
+        quality: 2,
+      },
+      { statsRandom: -0.128271, definitionId: 'hip_spread_pre', quality: 2 },
+    ]);
+  });
+
+  it('не модуль или мусор - null', () => {
+    expect(attributesOf(undefined)).toBeNull();
+    expect(attributesOf({ qlt: 3 })).toBeNull();
+    expect(
+      attributesOf({ attributes: [null, { definitionId: '../x' }] }),
+    ).toBeNull();
+  });
+});
 
 describe('variantOf', () => {
   it('ключевая характеристика модуля - атрибут с type 2', () => {

@@ -360,6 +360,8 @@ model AuctionLot {
   upgrade      Int       @default(0)
   /// Ключевая характеристика модуля (см. AuctionSale.variant)
   variant      String    @default("")
+  /// Все атрибуты модуля из EXBO (приставка, суффикс, ключевая; quality и statsRandom) - для процентов на сайте
+  attributes   Json?
   firstSeenAt  DateTime  @default(now())
   lastSeenAt   DateTime  @default(now())
   goneAt       DateTime?

@@ -29,12 +29,15 @@ class RegionQuery {
   region!: Region;
 }
 
+/** Больше 200 за запрос EXBO не отдаёт - такие запросы к нему урезаем (лоты из нашей БД - до 1000). */
+export const EXBO_PAGE_MAX = 200;
+
 class PageQuery extends RegionQuery {
   @IsOptional()
   @Type(() => Number)
   @IsInt()
   @Min(1)
-  @Max(200)
+  @Max(EXBO_PAGE_MAX)
   limit?: number;
 
   @IsOptional()
@@ -46,6 +49,14 @@ class PageQuery extends RegionQuery {
 }
 
 export class AuctionQueryDto extends PageQuery {
+  /** Лоты из нашей БД - до 1000 за запрос (рынок модулей ~4 тыс.); к EXBO уходит не больше 200 */
+  @IsOptional()
+  @Type(() => Number)
+  @IsInt()
+  @Min(1)
+  @Max(1000)
+  declare limit?: number;
+
   /** ID предмета из базы EXBO: «gyn0», «5lpy4» */
   @Matches(/^[a-z0-9]{1,16}$/, { message: 'item: некорректный ID предмета' })
   item!: string;
