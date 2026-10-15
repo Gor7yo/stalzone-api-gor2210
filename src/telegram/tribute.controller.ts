@@ -91,12 +91,19 @@ export class TributeController {
       throw e;
     }
 
-    const until =
+    // Telegram привязан к аккаунту - Pro аккаунту; нет - ждёт на чате до привязки
+    const { userId, until } =
       action.kind === 'grant'
-        ? await this.pro.grant(action.chatId, action.days)
-        : await this.pro.extendTo(action.chatId, action.until);
+        ? await this.pro.grantChat(action.chatId, action.days)
+        : await this.pro.extendChatTo(action.chatId, action.until);
+    if (userId) {
+      await this.prisma.proPayment.update({
+        where: { id: action.key },
+        data: { userId },
+      });
+    }
     this.logger.log(
-      `Tribute ${hook.name}: Pro для ${action.chatId} до ${until.toISOString()}`,
+      `Tribute ${hook.name}: Pro для ${action.chatId} (аккаунт ${userId ?? 'не привязан'}) до ${until.toISOString()}`,
     );
 
     const date = until.toLocaleDateString('ru-RU', {
@@ -107,7 +114,9 @@ export class TributeController {
     });
     await this.bot.send(
       action.chatId,
-      `⭐ <b>STALZONE INFO Pro активен</b> до ${date}.\nСпасибо за поддержку! Флиппер, графики и флип-алерты уже открыты.`,
+      userId
+        ? `⭐ <b>STALZONE INFO Pro активен</b> до ${date}.\nСпасибо за поддержку! Флиппер, графики и флип-алерты уже открыты.`
+        : `⭐ <b>STALZONE INFO Pro оплачен</b> до ${date}. Спасибо за поддержку!\nВойдите в приложении через EXBO - Pro перейдёт на ваш аккаунт и откроется.`,
     );
     return { ok: true };
   }

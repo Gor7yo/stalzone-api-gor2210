@@ -61,9 +61,10 @@ export class AlertsService {
 
   /** Регистрирует пользователя (или снимает пометку «заблокировал бота»). */
   upsertSubscriber(user: SubscriberInfo) {
+    // имя/ник обновляем, только если они пришли (с сайта приходит один id)
     const data = {
-      firstName: user.first_name ?? null,
-      username: user.username ?? null,
+      ...(user.first_name !== undefined && { firstName: user.first_name }),
+      ...(user.username !== undefined && { username: user.username }),
       blocked: false,
     };
     return this.prisma.telegramSubscriber.upsert({
@@ -101,7 +102,7 @@ export class AlertsService {
   async createPrice(user: SubscriberInfo, dto: CreatePriceAlertDto) {
     await this.upsertSubscriber(user);
     const chatId = BigInt(user.id);
-    const { pro, limits } = await this.pro.status(chatId);
+    const { pro, limits } = await this.pro.chatStatus(chatId);
     const count = await this.prisma.priceAlert.count({ where: { chatId } });
     if (count >= limits.priceAlerts) {
       throw new ForbiddenException({
@@ -164,7 +165,7 @@ export class AlertsService {
   async setFlip(user: SubscriberInfo, dto: FlipAlertDto) {
     await this.upsertSubscriber(user);
     const chatId = BigInt(user.id);
-    await this.pro.require(chatId);
+    await this.pro.requireChat(chatId);
     const data = {
       minProfit: dto.minProfit,
       minPct: dto.minPct ?? MIN_PCT,

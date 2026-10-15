@@ -17,9 +17,12 @@ API, сборщик аукциона и Telegram-бот для [STALZONE INFO](h
 - **Telegram-бот** - алерты цены, флип-алерты, начало выброса; привязка сайта к Telegram без пароля.
 - **Pro-подписка** - пробный период 3 дня, оплата через [Tribute](https://tribute.tg) (вебхук с проверкой
   подписи, идемпотентность), ручная выдача.
-- **Админка** - метрики (пользователи, DAU/WAU/MAU, Pro, выручка, сборщик), поиск по @нику или id,
-  выдача Pro и баны на любой срок, журнал действий. Доступ - по Telegram id из `ADMIN_CHAT_IDS`.
-- **Вход через EXBO** - OAuth 2.0 Authorization Code Flow с `state`.
+- **Админка** - метрики (аккаунты, DAU/WAU/MAU, Pro, выручка, сборщик), поиск по логину EXBO, @нику или id Telegram,
+  выдача Pro и баны на любой срок, журнал действий. Доступ - аккаунту с Telegram из `ADMIN_CHAT_IDS`.
+- **Аккаунт = EXBO** - вход через EXBO (OAuth 2.0 Authorization Code Flow с `state`), персонажи всех регионов.
+  Pro, пробный период и бан живут на аккаунте; Telegram привязывается к нему для алертов (через бота на сайте,
+  автоматически при входе из мини-приложения). Pro и бан копируются на привязанный чат - по нему работают бот и алерты.
+  Оплата Tribute с непривязанного Telegram ждёт на чате и переходит на аккаунт при привязке.
 
 ## Стек
 
@@ -54,7 +57,7 @@ npx jest
 | `CORS_PATHS` | адреса фронта через запятую |
 | `STALZONE_CLIENT_ID`, `STALZONE_CLIENT_SECRET` | приложение в кабинете разработчика EXBO |
 | `STALZONE_OAUTH_URL`, `STALZONE_API_URL` | `https://exbo.net`, `https://eapi.stalzone.com` |
-| `STALZONE_REDIRECT_URI` | адрес возврата после входа через EXBO (страница фронта) |
+| `STALZONE_REDIRECT_URI` | адрес возврата после входа через EXBO - страница фронта `https://<сайт>/auth/stalzone/callback`, должен совпадать с адресом в кабинете EXBO |
 | `TELEGRAM_BOT_TOKEN` | токен бота от @BotFather; без него бот и алерты выключены |
 | `TELEGRAM_APP_URL` | ссылка на мини-приложение `https://t.me/<бот>/<приложение>` |
 | `TELEGRAM_POLLING` | `false` - не опрашивать бота (если его опрашивает другой процесс) |
@@ -73,7 +76,10 @@ npx jest
 | | |
 |---|---|
 | `GET /api/auction/...`, `/api/character/...`, `/api/clan/...`, `/api/emission` | данные для сайта |
-| `GET /api/me`, `POST /api/me/trial` | статус Pro, пробный период |
+| `POST /api/auth/exbo/start`, `POST /api/auth/exbo/complete`, `POST /api/auth/logout` | вход через EXBO (сессия сайта), выход |
+| `GET /api/me` | аккаунт: логин, Pro, персонажи, привязанный Telegram |
+| `POST /api/me/trial`, `POST /api/me/characters/refresh` | пробный Pro, перечитать персонажей из EXBO |
+| `POST /api/me/telegram`, `DELETE /api/me/telegram` | ссылка на бота для привязки Telegram, отвязка |
 | `GET /api/clan/search?region=&q=` | поиск клана по названию, тегу, нику лидера (своя копия списка EXBO) |
 | `GET /api/clan/metrics?region=&id=&period=` (week, month, all) | динамика клана: бойцы за сутки/неделю/месяц, пик, место по численности, график |
 | `GET /api/clan/analytics?region=` | сводка по кланам региона: рост и отток бойцов, группировки, новые/распущенные, распределения |
@@ -81,12 +87,13 @@ npx jest
 | `GET /api/sell/advice?region=&item=&quality=&upgrade=&amount=` | помощник продажи (Pro) |
 | `/api/alerts/*` | алерты цены, флипов и выброса |
 | `POST /api/payments/tribute` | вебхук Tribute |
-| `/api/admin/*` | админка (Telegram id из `ADMIN_CHAT_IDS`) |
+| `/api/admin/*` | админка (аккаунт с Telegram из `ADMIN_CHAT_IDS`) |
 | `GET /api/collector/status` | состояние сборщика (`X-Admin-Token`) |
 | `GET /api/health` | проверка живости |
 
-Пользователь определяется по Telegram: `Authorization: tma <initData>` в мини-приложении или
-`Bearer <токен>` на сайте после привязки через бота.
+Пользователь - аккаунт EXBO: `Authorization: Bearer <токен>` сессии после входа через EXBO или
+`tma <initData>` в мини-приложении (аккаунт, к которому привязан этот Telegram). Без аккаунта - 401 `login_required`,
+алерты без привязанного Telegram - 409 `telegram_required`.
 
 ## Структура
 

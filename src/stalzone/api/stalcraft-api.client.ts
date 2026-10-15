@@ -20,6 +20,13 @@ type Params = Record<string, string | number | boolean | undefined>;
 
 const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
 
+/** EXBO не принял токен игрока (отозван или истёк) - нужен повторный вход. */
+export class UserTokenRevokedError extends Error {
+  constructor() {
+    super('Токен EXBO игрока отозван');
+  }
+}
+
 /**
  * Единая точка доступа к STALCRAFT API (eapi.stalzone.com).
  *
@@ -160,6 +167,35 @@ export class StalcraftApiClient {
       }
 
       this.logger.warn(`STALCRAFT API ${status ?? error.code} ← /${path}`);
+      throw this.toHttpException(status, error.code);
+    }
+  }
+
+  /**
+   * Запрос от имени игрока (его токен EXBO): персонажи, друзья. Без кеша и повторов -
+   * ответ личный, а 401 значит, что токен отозван и нужен новый вход.
+   */
+  async getAsUser<T>(segments: string[], accessToken: string): Promise<T> {
+    const path = segments.map((s) => encodeURIComponent(s)).join('/');
+    try {
+      await this.budget.take(this.cost(path), 'user');
+    } catch {
+      throw this.toHttpException(429);
+    }
+    try {
+      const { data } = await firstValueFrom(
+        this.http.get<T>(`${this.baseUrl}/${path}`, {
+          headers: { Authorization: `Bearer ${accessToken}` },
+        }),
+      );
+      return data;
+    } catch (error) {
+      if (!isAxiosError(error)) throw error;
+      const status = error.response?.status;
+      this.logger.warn(
+        `STALCRAFT API ${status ?? error.code} ← /${path} (токен игрока)`,
+      );
+      if (status === 401) throw new UserTokenRevokedError();
       throw this.toHttpException(status, error.code);
     }
   }

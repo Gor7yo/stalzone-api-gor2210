@@ -102,7 +102,7 @@ describe('clan-metrics: сводка региона', () => {
     }),
     clan('c', {
       memberCount: 1,
-      alliance: null,
+      alliance: 'none',
       registrationTime: NOW - 2 * D,
       week: base(1, NOW - 2 * D),
     }),
@@ -128,7 +128,7 @@ describe('clan-metrics: сводка региона', () => {
     expect(s.windows.week.full).toBe(true);
   });
 
-  it('группировки — без кланов без группировки', () => {
+  it('группировки — только четыре игровые', () => {
     expect(s.alliances.map((a) => a.alliance)).toEqual(['duty', 'freedom']);
     expect(s.alliances[0]).toMatchObject({
       clans: 1,
@@ -139,9 +139,6 @@ describe('clan-metrics: сводка региона', () => {
   });
 
   it('распределения', () => {
-    expect(s.sizes).toHaveLength(35);
-    expect(s.sizes[0]).toEqual({ members: 1, clans: 1 });
-    expect(s.sizes[34]).toEqual({ members: 35, clans: 1 });
     expect(s.newClans.list[0]).toMatchObject({ id: 'c', ageDays: 2 });
     expect(s.levels).toEqual([
       { level: 1, clans: 2, members: 5 },

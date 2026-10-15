@@ -9,6 +9,15 @@ const HOUR = 3_600_000;
 /** Больше бойцов в клане не бывает (ограничение игры). */
 export const MAX_MEMBERS = 35;
 
+/** Группировки кланов в игре; всё прочее (нет группировки, «none») в разбивку не попадает. */
+export const ALLIANCES = ['duty', 'freedom', 'merc', 'covenant'] as const;
+
+/** Ключ группировки из ответа EXBO («Mercs» → merc); null — не одна из четырёх. */
+export function allianceKey(alliance: string | null): string | null {
+  const k = alliance?.toLowerCase().replace(/s$/, '') ?? '';
+  return (ALLIANCES as readonly string[]).includes(k) ? k : null;
+}
+
 export const SERIES_PERIODS = ['week', 'month', 'all'] as const;
 export type SeriesPeriod = (typeof SERIES_PERIODS)[number];
 
@@ -125,8 +134,8 @@ export function regionSeries(
       const e = sorted[i];
       members += e.dm;
       clans += e.dc;
-      if (e.alliance)
-        byAlliance[e.alliance] = (byAlliance[e.alliance] ?? 0) + e.dm;
+      const key = allianceKey(e.alliance);
+      if (key) byAlliance[key] = (byAlliance[key] ?? 0) + e.dm;
     }
   };
   const out: RegionPoint[] = [];
@@ -230,14 +239,15 @@ export function summarizeRegion(
   const delta = (c: RegionClan, b: RegionClan['day']) =>
     b ? c.memberCount - b.memberCount : 0;
 
-  // группировки: только настоящие (кланы без группировки — в общих итогах)
+  // группировки: только четыре игровые (остальные кланы — лишь в общих итогах)
   const byAlliance = new Map<
     string,
     { clans: number; members: number; membersWeek: number }
   >();
   for (const c of clans) {
-    if (!c.alliance) continue;
-    const a = byAlliance.get(c.alliance) ?? {
+    const key = allianceKey(c.alliance);
+    if (!key) continue;
+    const a = byAlliance.get(key) ?? {
       clans: 0,
       members: 0,
       membersWeek: 0,
@@ -245,7 +255,7 @@ export function summarizeRegion(
     a.clans++;
     a.members += c.memberCount;
     a.membersWeek += delta(c, c.week);
-    byAlliance.set(c.alliance, a);
+    byAlliance.set(key, a);
   }
   const allianceMembers = [...byAlliance.values()].reduce(
     (s, a) => s + a.members,
@@ -270,16 +280,6 @@ export function summarizeRegion(
     levels.set(c.level, l);
   }
 
-  // сколько кланов с 1, 2 … 35 бойцами
-  const sizes = Array.from({ length: MAX_MEMBERS }, (_, i) => ({
-    members: i + 1,
-    clans: 0,
-  }));
-  for (const c of clans) {
-    const n = Math.min(MAX_MEMBERS, Math.max(1, c.memberCount));
-    sizes[n - 1].clans++;
-  }
-
   const weekAgo = now - 7 * DAY;
   const fresh = clans
     .filter((c) => c.registrationTime != null && c.registrationTime >= weekAgo)
@@ -302,7 +302,7 @@ export function summarizeRegion(
       avgMembers: clans.length ? totalMembers / clans.length : 0,
       medianMembers: median(clans.map((c) => c.memberCount)),
       /** кланов с полным составом */
-      full: sizes[MAX_MEMBERS - 1].clans,
+      full: clans.filter((c) => c.memberCount >= MAX_MEMBERS).length,
       medianAgeDays: Math.round(median(ages)),
       /** чистое изменение бойцов в кланах за сутки и неделю */
       membersDay: clans.reduce((s, c) => s + delta(c, c.day), 0),
@@ -337,7 +337,6 @@ export function summarizeRegion(
     levels: [...levels.entries()]
       .map(([level, l]) => ({ level, ...l }))
       .sort((a, b) => a.level - b.level),
-    sizes,
     ages: AGE_BUCKETS.map((b) => ({
       label: b.label,
       clans: ages.filter((a) => a >= b.min && a < b.max).length,

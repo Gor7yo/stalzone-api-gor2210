@@ -25,11 +25,64 @@ model User {
   distributor    String?
   distributor_id String?
 
-  createdAt       DateTime         @default(now())
-  updatedAt       DateTime         @updatedAt
+  /// Telegram, привязанный к аккаунту для алертов (один аккаунт - один Telegram)
+  chatId       BigInt?   @unique @map("chat_id")
+  /// Персонажи по всем регионам из EXBO /{region}/characters (ExboCharacter[])
+  characters   Json?
+  charactersAt DateTime? @map("characters_at")
+
+  /// Pro действует до этого момента. Копируется на привязанный Telegram (alerts.watcher смотрит туда)
+  proUntil    DateTime? @map("pro_until")
+  /// Пробный Pro взят (один раз на аккаунт и на Telegram)
+  trialUsedAt DateTime? @map("trial_used_at")
+  /// Бан от админа; копируется на привязанный Telegram (бот молчит)
+  bannedUntil DateTime? @map("banned_until")
+  banReason   String?   @map("ban_reason")
+  /// Последний визит (не чаще раза в 10 мин)
+  lastSeenAt  DateTime? @map("last_seen_at")
+
+  createdAt       DateTime            @default(now())
+  updatedAt       DateTime            @updatedAt
   stalzoneAccount StalzoneAccount?
+  subscriber      TelegramSubscriber? @relation(fields: [chatId], references: [chatId], onDelete: SetNull)
+  sessions        AccountSession[]
 
   @@map("users")
+}
+
+/// Сессия сайта после входа через EXBO (в браузере - токен, в БД - sha256 от него)
+model AccountSession {
+  id         String   @id @default(uuid())
+  tokenHash  String   @unique
+  userId     String
+  createdAt  DateTime @default(now())
+  lastUsedAt DateTime @default(now())
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId])
+  @@map("account_sessions")
+}
+
+/// День, когда аккаунт заходил (DAU/WAU в админке)
+model AccountActivityDay {
+  day    DateTime @db.Date
+  userId String
+
+  @@id([day, userId])
+  @@map("account_activity_days")
+}
+
+/// Одноразовый state входа через EXBO
+model ExboLinkState {
+  /// sha256 от state - сам state знают только браузер и EXBO
+  stateHash String   @id
+  /// Вход из мини-приложения: этот Telegram привяжется к аккаунту
+  chatId    BigInt?
+  expiresAt DateTime
+  createdAt DateTime @default(now())
+
+  @@map("exbo_link_states")
 }
 
 model StalzoneAccount {
@@ -111,7 +164,9 @@ model ActivityDay {
 model AdminLog {
   id        String   @id @default(uuid())
   adminId   BigInt
-  targetId  BigInt
+  /// Telegram цели (старые записи); новые - targetUserId
+  targetId  BigInt?
+  targetUserId String?
   /// pro_grant | pro_revoke | ban | unban
   action    String
   details   String?
@@ -126,6 +181,8 @@ model ProPayment {
   /// "product:<purchase_id>" или "sub:<subscription_id>:<expires_at>"
   id        String   @id
   chatId    BigInt
+  /// Аккаунт, которому выдан Pro (null - Telegram ещё не привязан, Pro ждёт на чате)
+  userId    String?
   event     String
   amount    Int?
   currency  String?
@@ -159,6 +216,7 @@ model TelegramSubscriber {
   priceAlerts PriceAlert[]
   flipAlerts  FlipAlert[]
   webSessions WebSession[]
+  exboUser    User?
 
   @@map("telegram_subscribers")
 }
@@ -235,6 +293,8 @@ model AppState {
 model TelegramLinkCode {
   /// sha256 от кода — сам код знает только браузер и ссылка t.me/<бот>?start=link_<код>
   codeHash  String   @id
+  /// Аккаунт, к которому привязываем Telegram
+  userId    String?
   /// Заполняется, когда пользователь подтвердил привязку в боте
   chatId    BigInt?
   expiresAt DateTime

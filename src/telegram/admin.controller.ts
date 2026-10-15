@@ -20,29 +20,32 @@ import {
   IsISO8601,
   IsOptional,
   IsString,
-  Matches,
+  IsUUID,
   Max,
   MaxLength,
   Min,
 } from 'class-validator';
 import { AccessService } from './access.service';
+import { AccountGuard, type AccountRequest } from './account.guard';
 import { AdminService } from './admin.service';
-import { TelegramAuthGuard, type TelegramRequest } from './telegram-auth.guard';
 
-/** Только Telegram id из ADMIN_CHAT_IDS; остальным — 404, будто эндпоинта нет. */
+/** Только аккаунт с Telegram из ADMIN_CHAT_IDS; остальным — 404, будто эндпоинта нет. */
 @Injectable()
 export class AdminGuard implements CanActivate {
   constructor(private readonly access: AccessService) {}
   canActivate(context: ExecutionContext) {
-    const req = context.switchToHttp().getRequest<TelegramRequest>();
-    if (req.tgUser && this.access.isAdmin(req.tgUser.id)) return true;
+    const req = context.switchToHttp().getRequest<AccountRequest>();
+    if (req.account && this.access.isAdmin(req.account.chatId)) return true;
     throw new NotFoundException();
   }
 }
 
-class ChatIdParam {
-  @Matches(/^\d{1,20}$/, { message: 'chatId — Telegram id числом' })
-  chatId!: string;
+/** Админ всегда с привязанным Telegram (иначе AdminGuard не пустит). */
+const adminOf = (req: AccountRequest) => req.account.chatId!;
+
+class UserIdParam {
+  @IsUUID('4', { message: 'id — id аккаунта' })
+  id!: string;
 }
 
 class UsersQuery {
@@ -84,7 +87,7 @@ class BanDto extends TermDto {
 }
 
 @Controller('api/admin')
-@UseGuards(TelegramAuthGuard, AdminGuard)
+@UseGuards(AccountGuard, AdminGuard)
 export class AdminController {
   constructor(private readonly admin: AdminService) {}
 
@@ -100,10 +103,10 @@ export class AdminController {
     return this.admin.users(query.q ?? '');
   }
 
-  @Get('users/:chatId')
+  @Get('users/:id')
   @Header('Cache-Control', 'no-store')
-  user(@Param() p: ChatIdParam) {
-    return this.admin.user(p.chatId);
+  user(@Param() p: UserIdParam) {
+    return this.admin.user(p.id);
   }
 
   @Get('log')
@@ -112,31 +115,31 @@ export class AdminController {
     return this.admin.log();
   }
 
-  @Post('users/:chatId/pro')
+  @Post('users/:id/pro')
   grantPro(
-    @Req() req: TelegramRequest,
-    @Param() p: ChatIdParam,
+    @Req() req: AccountRequest,
+    @Param() p: UserIdParam,
     @Body() dto: GrantProDto,
   ) {
-    return this.admin.grantPro(req.tgUser.id, p.chatId, dto);
+    return this.admin.grantPro(adminOf(req), p.id, dto);
   }
 
-  @Post('users/:chatId/pro/revoke')
-  revokePro(@Req() req: TelegramRequest, @Param() p: ChatIdParam) {
-    return this.admin.revokePro(req.tgUser.id, p.chatId);
+  @Post('users/:id/pro/revoke')
+  revokePro(@Req() req: AccountRequest, @Param() p: UserIdParam) {
+    return this.admin.revokePro(adminOf(req), p.id);
   }
 
-  @Post('users/:chatId/ban')
+  @Post('users/:id/ban')
   ban(
-    @Req() req: TelegramRequest,
-    @Param() p: ChatIdParam,
+    @Req() req: AccountRequest,
+    @Param() p: UserIdParam,
     @Body() dto: BanDto,
   ) {
-    return this.admin.ban(req.tgUser.id, p.chatId, dto);
+    return this.admin.ban(adminOf(req), p.id, dto);
   }
 
-  @Post('users/:chatId/unban')
-  unban(@Req() req: TelegramRequest, @Param() p: ChatIdParam) {
-    return this.admin.unban(req.tgUser.id, p.chatId);
+  @Post('users/:id/unban')
+  unban(@Req() req: AccountRequest, @Param() p: UserIdParam) {
+    return this.admin.unban(adminOf(req), p.id);
   }
 }

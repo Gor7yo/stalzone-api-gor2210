@@ -14,9 +14,8 @@ import { REGIONS, type Region } from 'src/api/dto/queries.dto';
 import { ServerGuard } from 'src/common/guards/server.guard';
 import { FlipperService } from 'src/flipper/flipper.service';
 import { SellAdvisorService } from 'src/flipper/sell-advisor.service';
-import { AccessService } from './access.service';
 import { ProService } from './pro.service';
-import { TelegramAuthGuard, type TelegramRequest } from './telegram-auth.guard';
+import { AccountGuard, type AccountRequest } from './account.guard';
 
 class FlipsQueryDto {
   @IsIn(REGIONS, { message: `region: одно из ${REGIONS.join(', ')}` })
@@ -63,36 +62,9 @@ class GrantProDto {
   days!: number;
 }
 
-/** Статус подписки текущего пользователя. */
-@Controller('api/me')
-@UseGuards(TelegramAuthGuard)
-export class MeController {
-  constructor(
-    private readonly pro: ProService,
-    private readonly access: AccessService,
-  ) {}
-
-  @Get()
-  @Header('Cache-Control', 'no-store')
-  async me(@Req() req: TelegramRequest) {
-    const status = await this.pro.status(req.tgUser.id);
-    return {
-      ...status,
-      ...(this.access.isAdmin(req.tgUser.id) && { admin: true }),
-    };
-  }
-
-  /** Взять пробный Pro (один раз). Отдаёт новый статус. */
-  @Post('trial')
-  @Header('Cache-Control', 'no-store')
-  trial(@Req() req: TelegramRequest) {
-    return this.pro.startTrial(req.tgUser.id);
-  }
-}
-
 /** Лента флиппера — только для Pro. */
 @Controller('api/flips')
-@UseGuards(TelegramAuthGuard)
+@UseGuards(AccountGuard)
 export class FlipsController {
   constructor(
     private readonly pro: ProService,
@@ -101,15 +73,15 @@ export class FlipsController {
 
   @Get()
   @Header('Cache-Control', 'private, max-age=30')
-  async flips(@Req() req: TelegramRequest, @Query() query: FlipsQueryDto) {
-    await this.pro.require(req.tgUser.id);
+  async flips(@Req() req: AccountRequest, @Query() query: FlipsQueryDto) {
+    await this.pro.require(req.account.userId);
     return this.flipper.feed(query.region);
   }
 }
 
 /** Помощник продажи — только для Pro. */
 @Controller('api/sell')
-@UseGuards(TelegramAuthGuard)
+@UseGuards(AccountGuard)
 export class SellController {
   constructor(
     private readonly pro: ProService,
@@ -118,8 +90,8 @@ export class SellController {
 
   @Get('advice')
   @Header('Cache-Control', 'private, max-age=20')
-  async advice(@Req() req: TelegramRequest, @Query() query: SellQueryDto) {
-    await this.pro.require(req.tgUser.id);
+  async advice(@Req() req: AccountRequest, @Query() query: SellQueryDto) {
+    await this.pro.require(req.account.userId);
     return this.advisor.advise({
       region: query.region,
       itemId: query.item,
@@ -138,7 +110,10 @@ export class ProAdminController {
 
   @Post()
   async grant(@Body() dto: GrantProDto) {
-    const proUntil = await this.pro.grant(BigInt(dto.chatId), dto.days);
-    return { chatId: dto.chatId, proUntil };
+    const { userId, until } = await this.pro.grantChat(
+      BigInt(dto.chatId),
+      dto.days,
+    );
+    return { chatId: dto.chatId, userId, proUntil: until };
   }
 }

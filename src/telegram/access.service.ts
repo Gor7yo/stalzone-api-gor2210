@@ -1,6 +1,7 @@
 import { ForbiddenException, Injectable, Logger } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { PrismaService } from 'src/prisma/prisma.service';
+import type { Account } from './account.service';
 import type { SubscriberInfo } from './alerts.service';
 
 const MIN = 60_000;
@@ -17,8 +18,8 @@ export const isBanned = (until: Date | null | undefined, now = Date.now()) =>
 const today = () => new Date(new Date().toISOString().slice(0, 10));
 
 /**
- * Доступ пользователя Telegram: бан от админа, отметка визита (для метрик)
- * и проверка «админ ли это» (ADMIN_CHAT_IDS в .env).
+ * Доступ: бан от админа, отметка визита (для метрик) и «админ ли это»
+ * (ADMIN_CHAT_IDS в .env - Telegram id; админ - аккаунт с таким привязанным Telegram).
  */
 @Injectable()
 export class AccessService {
@@ -41,16 +42,21 @@ export class AccessService {
       this.logger.warn('ADMIN_CHAT_IDS не задан — админка недоступна');
   }
 
-  isAdmin(chatId: number | bigint) {
-    return this.admins.has(String(chatId));
+  isAdmin(chatId: number | bigint | null | undefined) {
+    return chatId != null && this.admins.has(String(chatId));
   }
 
-  /** Бросает 403 code=banned, если пользователь забанен. Заодно отмечает визит. */
-  async check(user: SubscriberInfo) {
-    const key = String(user.id);
-    this.touch(user);
-    if (this.isAdmin(user.id)) return;
-    const until = await this.bannedUntil(key);
+  /** Бросает 403 code=banned, если аккаунт забанен. Заодно отмечает визит. */
+  async check(account: Account) {
+    this.touch(account.userId);
+    if (this.isAdmin(account.chatId)) return;
+    const until = await this.cached(`u:${account.userId}`, async () => {
+      const u = await this.prisma.user.findUnique({
+        where: { id: account.userId },
+        select: { bannedUntil: true },
+      });
+      return u?.bannedUntil ?? null;
+    });
     if (isBanned(until)) {
       throw new ForbiddenException({
         statusCode: 403,
@@ -61,44 +67,65 @@ export class AccessService {
     }
   }
 
-  async bannedUntil(chatId: string): Promise<Date | null> {
-    const cached = this.bans.get(chatId);
-    if (cached && Date.now() - cached.at < BAN_CACHE_MS) return cached.until;
-    const s = await this.prisma.telegramSubscriber.findUnique({
-      where: { chatId: BigInt(chatId) },
-      select: { bannedUntil: true },
+  /** Бан Telegram-чата (копия бана аккаунта) - бот не отвечает забаненным. */
+  bannedUntil(chatId: string): Promise<Date | null> {
+    return this.cached(`c:${chatId}`, async () => {
+      const s = await this.prisma.telegramSubscriber.findUnique({
+        where: { chatId: BigInt(chatId) },
+        select: { bannedUntil: true },
+      });
+      return s?.bannedUntil ?? null;
     });
-    const until = s?.bannedUntil ?? null;
-    this.bans.set(chatId, { until, at: Date.now() });
-    return until;
   }
 
   /** Админ поменял бан — сбросить кеш, чтобы сработало сразу. */
-  forget(chatId: string) {
-    this.bans.delete(chatId);
+  forget(userId: string, chatId?: bigint | null) {
+    this.bans.delete(`u:${userId}`);
+    if (chatId != null) this.bans.delete(`c:${chatId}`);
   }
 
-  /** Отметка визита: subscriber (с ником для поиска), lastSeenAt и день активности. */
-  private touch(user: SubscriberInfo) {
-    const key = String(user.id);
-    const last = this.seen.get(key) ?? 0;
-    if (Date.now() - last < SEEN_EVERY_MS) return;
+  /** Мини-приложение: обновить имя/ник Telegram (для поиска в админке). */
+  touchChat(user: SubscriberInfo) {
+    const key = `c:${user.id}`;
+    if (Date.now() - (this.seen.get(key) ?? 0) < SEEN_EVERY_MS) return;
     this.seen.set(key, Date.now());
     const chatId = BigInt(user.id);
-    const now = new Date();
     const names = {
       ...(user.first_name !== undefined && { firstName: user.first_name }),
       ...(user.username !== undefined && { username: user.username }),
     };
+    void this.prisma.telegramSubscriber
+      .upsert({
+        where: { chatId },
+        create: { chatId, ...names, lastSeenAt: new Date() },
+        update: { ...names, lastSeenAt: new Date() },
+      })
+      .catch((error: unknown) =>
+        this.logger.warn(`отметка Telegram: ${String(error)}`),
+      );
+  }
+
+  private async cached(key: string, load: () => Promise<Date | null>) {
+    const hit = this.bans.get(key);
+    if (hit && Date.now() - hit.at < BAN_CACHE_MS) return hit.until;
+    const until = await load();
+    this.bans.set(key, { until, at: Date.now() });
+    return until;
+  }
+
+  /** Отметка визита аккаунта: lastSeenAt и день активности. */
+  private touch(userId: string) {
+    const key = `u:${userId}`;
+    if (Date.now() - (this.seen.get(key) ?? 0) < SEEN_EVERY_MS) return;
+    this.seen.set(key, Date.now());
     void this.prisma
       .$transaction([
-        this.prisma.telegramSubscriber.upsert({
-          where: { chatId },
-          create: { chatId, ...names, lastSeenAt: now },
-          update: { ...names, lastSeenAt: now },
+        this.prisma.user.update({
+          where: { id: userId },
+          data: { lastSeenAt: new Date() },
         }),
-        this.prisma.activityDay.createMany({
-          data: [{ day: today(), chatId }],
+        this.prisma.accountActivityDay.createMany({
+          data: [{ day: today(), userId }],
           skipDuplicates: true,
         }),
       ])

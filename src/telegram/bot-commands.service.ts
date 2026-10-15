@@ -100,11 +100,18 @@ export class BotCommandsService implements OnModuleInit {
   /** Подтверждение кнопкой: чужая ссылка, открытая по ошибке, ничего не привяжет. */
   private async askLink(chatId: number, code: string) {
     if (!LINK_CODE_RE.test(code)) return this.start(chatId);
+    const login = await this.webLink.pendingLogin(code);
+    if (!login) {
+      return void this.bot.send(
+        chatId,
+        '⌛ Ссылка привязки устарела. Нажмите «Привязать Telegram» на сайте ещё раз.',
+      );
+    }
     await this.bot.send(
       chatId,
       [
-        '🔗 <b>Привязать сайт STALZONE INFO к этому Telegram?</b>',
-        'Уведомления, включённые на сайте, будут приходить сюда.',
+        `🔗 <b>Привязать этот Telegram к аккаунту ${escapeHtml(login)}?</b>`,
+        'Алерты и уведомления о выбросе аккаунта будут приходить сюда.',
         '',
         'Если вы не нажимали «Привязать Telegram» на сайте — просто проигнорируйте это сообщение.',
       ].join('\n'),
@@ -197,7 +204,7 @@ export class BotCommandsService implements OnModuleInit {
             message_id: message.message_id,
             parse_mode: 'HTML',
             text: ok
-              ? '✅ <b>Сайт привязан.</b> Вернитесь на сайт — уведомления можно включать.'
+              ? '✅ <b>Telegram привязан.</b> Вернитесь на сайт — уведомления можно включать.'
               : '⌛ Ссылка устарела. Нажмите «Привязать Telegram» на сайте ещё раз.',
           })
           .catch(() => {});

@@ -6,6 +6,7 @@ import {
 import { CollectorService } from 'src/collector/collector.service';
 import { PrismaService } from 'src/prisma/prisma.service';
 import { AccessService, FOREVER_MS, isBanned } from './access.service';
+import { AccountService } from './account.service';
 import { isProActive, ProService } from './pro.service';
 import { TelegramBotService } from './telegram-bot.service';
 
@@ -39,47 +40,59 @@ const fmt = (d: Date) =>
     ? 'навсегда'
     : `до ${d.toLocaleDateString('ru-RU', { day: 'numeric', month: 'long', year: 'numeric', timeZone: 'Europe/Moscow' })}`;
 
-/** Пользователь для админки (chatId — строкой: BigInt в JSON не уходит). */
-function publicUser(s: {
-  chatId: bigint;
-  username: string | null;
-  firstName: string | null;
-  proUntil: Date | null;
-  trialUsedAt: Date | null;
-  bannedUntil: Date | null;
-  banReason: string | null;
-  blocked: boolean;
-  lastSeenAt: Date | null;
-  createdAt: Date;
-}) {
-  return {
-    chatId: String(s.chatId),
-    username: s.username,
-    firstName: s.firstName,
-    pro: isProActive(s.proUntil),
-    proUntil: s.proUntil,
-    trialUsedAt: s.trialUsedAt,
-    banned: isBanned(s.bannedUntil),
-    bannedUntil: s.bannedUntil,
-    banReason: s.banReason,
-    botBlocked: s.blocked,
-    lastSeenAt: s.lastSeenAt,
-    createdAt: s.createdAt,
-  };
-}
-
 const USER_SELECT = {
+  id: true,
+  login: true,
   chatId: true,
-  username: true,
-  firstName: true,
   proUntil: true,
   trialUsedAt: true,
   bannedUntil: true,
   banReason: true,
-  blocked: true,
   lastSeenAt: true,
   createdAt: true,
+  subscriber: { select: { username: true, firstName: true, blocked: true } },
 } as const;
+
+type UserRow = {
+  id: string;
+  login: string;
+  chatId: bigint | null;
+  proUntil: Date | null;
+  trialUsedAt: Date | null;
+  bannedUntil: Date | null;
+  banReason: string | null;
+  lastSeenAt: Date | null;
+  createdAt: Date;
+  subscriber: {
+    username: string | null;
+    firstName: string | null;
+    blocked: boolean;
+  } | null;
+};
+
+/** Аккаунт для админки (chatId — строкой: BigInt в JSON не уходит). */
+function publicUser(u: UserRow) {
+  return {
+    id: u.id,
+    login: u.login,
+    telegram: u.chatId
+      ? {
+          chatId: String(u.chatId),
+          username: u.subscriber?.username ?? null,
+          firstName: u.subscriber?.firstName ?? null,
+          botBlocked: u.subscriber?.blocked ?? false,
+        }
+      : null,
+    pro: isProActive(u.proUntil),
+    proUntil: u.proUntil,
+    trialUsedAt: u.trialUsedAt,
+    banned: isBanned(u.bannedUntil),
+    bannedUntil: u.bannedUntil,
+    banReason: u.banReason,
+    lastSeenAt: u.lastSeenAt,
+    createdAt: u.createdAt,
+  };
+}
 
 @Injectable()
 export class AdminService {
@@ -87,6 +100,7 @@ export class AdminService {
     private readonly prisma: PrismaService,
     private readonly pro: ProService,
     private readonly access: AccessService,
+    private readonly accounts: AccountService,
     private readonly bot: TelegramBotService,
     private readonly collector: CollectorService,
   ) {}
@@ -96,15 +110,16 @@ export class AdminService {
     const ago = (days: number) => new Date(now.getTime() - days * DAY);
     const since = ago(SERIES_DAYS);
     const db = this.prisma;
-    const sub = db.telegramSubscriber;
+    const users = db.user;
 
     const [
-      users,
+      total,
       new1,
       new7,
       dau,
       wau,
       mau,
+      telegram,
       proActive,
       trials,
       banned,
@@ -120,18 +135,21 @@ export class AdminService {
       paySeries,
       collector,
     ] = await Promise.all([
-      sub.count(),
-      sub.count({ where: { createdAt: { gte: ago(1) } } }),
-      sub.count({ where: { createdAt: { gte: ago(7) } } }),
-      sub.count({ where: { lastSeenAt: { gte: ago(1) } } }),
-      sub.count({ where: { lastSeenAt: { gte: ago(7) } } }),
-      sub.count({ where: { lastSeenAt: { gte: ago(30) } } }),
-      sub.count({ where: { proUntil: { gt: now } } }),
-      sub.count({ where: { trialUsedAt: { not: null } } }),
-      sub.count({ where: { bannedUntil: { gt: now } } }),
+      users.count(),
+      users.count({ where: { createdAt: { gte: ago(1) } } }),
+      users.count({ where: { createdAt: { gte: ago(7) } } }),
+      users.count({ where: { lastSeenAt: { gte: ago(1) } } }),
+      users.count({ where: { lastSeenAt: { gte: ago(7) } } }),
+      users.count({ where: { lastSeenAt: { gte: ago(30) } } }),
+      users.count({ where: { chatId: { not: null } } }),
+      users.count({ where: { proUntil: { gt: now } } }),
+      users.count({ where: { trialUsedAt: { not: null } } }),
+      users.count({ where: { bannedUntil: { gt: now } } }),
       db.priceAlert.count(),
       db.flipAlert.count(),
-      sub.count({ where: { NOT: { emissionRegions: { isEmpty: true } } } }),
+      db.telegramSubscriber.count({
+        where: { NOT: { emissionRegions: { isEmpty: true } } },
+      }),
       db.proPayment.groupBy({ by: ['chatId'] }).then((r) => r.length),
       db.proPayment.count(),
       db.proPayment.groupBy({
@@ -147,9 +165,9 @@ export class AdminService {
       }),
       db.$queryRaw<{ day: Date; n: number }[]>`
         SELECT date_trunc('day', "createdAt")::date AS day, count(*)::int AS n
-        FROM telegram_subscribers WHERE "createdAt" >= ${since} GROUP BY 1`,
+        FROM users WHERE "createdAt" >= ${since} GROUP BY 1`,
       db.$queryRaw<{ day: Date; n: number }[]>`
-        SELECT day, count(*)::int AS n FROM activity_days WHERE day >= ${since}::date GROUP BY 1`,
+        SELECT day, count(*)::int AS n FROM account_activity_days WHERE day >= ${since}::date GROUP BY 1`,
       db.$queryRaw<{ day: Date; n: number }[]>`
         SELECT date_trunc('day', "createdAt")::date AS day, count(*)::int AS n
         FROM pro_payments WHERE "createdAt" >= ${since} GROUP BY 1`,
@@ -173,7 +191,7 @@ export class AdminService {
 
     return {
       updatedAt: now.toISOString(),
-      users: { total: users, new1, new7, dau, wau, mau, banned },
+      users: { total, new1, new7, dau, wau, mau, banned, telegram },
       pro: { active: proActive, trials, paidUsers, payments },
       revenue: { total: money(revenue), last30: money(revenue30) },
       alerts: { price: priceAlerts, flip: flipAlerts, emission },
@@ -193,20 +211,21 @@ export class AdminService {
     };
   }
 
-  /** Поиск: @ник, часть ника/имени или Telegram id. Пусто — последние активные. */
+  /** Поиск: логин EXBO, @ник или имя Telegram, Telegram id. Пусто — последние активные. */
   async users(q: string) {
     const query = q.trim().replace(/^@/, '');
+    const like = { contains: query, mode: 'insensitive' as const };
     const where = !query
       ? {}
-      : /^\d+$/.test(query)
-        ? { chatId: BigInt(query) }
-        : {
-            OR: [
-              { username: { contains: query, mode: 'insensitive' as const } },
-              { firstName: { contains: query, mode: 'insensitive' as const } },
-            ],
-          };
-    const list = await this.prisma.telegramSubscriber.findMany({
+      : {
+          OR: [
+            { login: like },
+            { subscriber: { is: { username: like } } },
+            { subscriber: { is: { firstName: like } } },
+            ...(/^\d{1,20}$/.test(query) ? [{ chatId: BigInt(query) }] : []),
+          ],
+        };
+    const list = await this.prisma.user.findMany({
       where,
       select: USER_SELECT,
       orderBy: [
@@ -218,30 +237,40 @@ export class AdminService {
     return list.map(publicUser);
   }
 
-  async user(chatId: string) {
-    const s = await this.prisma.telegramSubscriber.findUnique({
-      where: { chatId: BigInt(chatId) },
-      select: {
-        ...USER_SELECT,
-        _count: { select: { priceAlerts: true, flipAlerts: true } },
-      },
+  async user(id: string) {
+    const u = await this.prisma.user.findUnique({
+      where: { id },
+      select: USER_SELECT,
     });
-    if (!s) throw new NotFoundException('Пользователь не найден');
-    const [payments, log] = await Promise.all([
+    if (!u) throw new NotFoundException('Пользователь не найден');
+    const [price, flip, payments, log] = await Promise.all([
+      u.chatId
+        ? this.prisma.priceAlert.count({ where: { chatId: u.chatId } })
+        : 0,
+      u.chatId
+        ? this.prisma.flipAlert.count({ where: { chatId: u.chatId } })
+        : 0,
       this.prisma.proPayment.findMany({
-        where: { chatId: s.chatId },
+        where: {
+          OR: [{ userId: u.id }, ...(u.chatId ? [{ chatId: u.chatId }] : [])],
+        },
         orderBy: { createdAt: 'desc' },
         take: 20,
       }),
       this.prisma.adminLog.findMany({
-        where: { targetId: s.chatId },
+        where: {
+          OR: [
+            { targetUserId: u.id },
+            ...(u.chatId ? [{ targetId: u.chatId }] : []),
+          ],
+        },
         orderBy: { createdAt: 'desc' },
         take: 20,
       }),
     ]);
     return {
-      ...publicUser(s),
-      alerts: { price: s._count.priceAlerts, flip: s._count.flipAlerts },
+      ...publicUser(u),
+      alerts: { price, flip },
       payments: payments.map((p) => ({ ...p, chatId: String(p.chatId) })),
       log: log.map(publicLog),
     };
@@ -253,90 +282,88 @@ export class AdminService {
       orderBy: { createdAt: 'desc' },
       take: 50,
     });
-    return rows.map(publicLog);
+    // логины целей - чтобы в журнале было видно, кому выдали/кого забанили
+    const ids = [...new Set(rows.flatMap((r) => r.targetUserId ?? []))];
+    const users = await this.prisma.user.findMany({
+      where: { id: { in: ids } },
+      select: { id: true, login: true },
+    });
+    const login = new Map(users.map((u) => [u.id, u.login]));
+    return rows.map((r) => ({
+      ...publicLog(r),
+      targetLogin: r.targetUserId ? (login.get(r.targetUserId) ?? null) : null,
+    }));
   }
 
   /** Выдать Pro: +дни к текущему сроку, до даты или навсегда. */
   async grantPro(
-    adminId: number,
-    chatId: string,
+    adminId: bigint,
+    id: string,
     term: Term & { notify?: boolean },
   ) {
-    await this.ensure(chatId);
+    const u = await this.target(id);
     const until =
       term.days && !term.until && !term.forever
-        ? await this.pro.grant(BigInt(chatId), term.days)
-        : await this.pro.setUntil(BigInt(chatId), untilOf(term));
-    await this.logAction(adminId, chatId, 'pro_grant', fmt(until!));
-    if (term.notify !== false)
+        ? await this.pro.grant(id, term.days)
+        : await this.pro.setUntil(id, untilOf(term));
+    await this.logAction(adminId, id, 'pro_grant', fmt(until));
+    if (term.notify !== false && u.chatId)
       await this.bot.send(
-        BigInt(chatId),
-        `⭐ <b>Вам выдан STALZONE INFO Pro</b> ${fmt(until!)}.\nФлиппер, графики и флип-алерты уже открыты.`,
+        u.chatId,
+        `⭐ <b>Вам выдан STALZONE INFO Pro</b> ${fmt(until)}.\nФлиппер, графики и флип-алерты уже открыты.`,
       );
-    return this.user(chatId);
+    return this.user(id);
   }
 
-  async revokePro(adminId: number, chatId: string) {
-    await this.ensure(chatId);
-    await this.pro.setUntil(BigInt(chatId), null);
-    await this.logAction(adminId, chatId, 'pro_revoke');
-    return this.user(chatId);
+  async revokePro(adminId: bigint, id: string) {
+    await this.target(id);
+    await this.pro.setUntil(id, null);
+    await this.logAction(adminId, id, 'pro_revoke');
+    return this.user(id);
   }
 
-  async ban(adminId: number, chatId: string, term: Term & { reason?: string }) {
-    if (this.access.isAdmin(BigInt(chatId)))
+  async ban(adminId: bigint, id: string, term: Term & { reason?: string }) {
+    const u = await this.target(id);
+    if (this.access.isAdmin(u.chatId))
       throw new BadRequestException('Нельзя забанить администратора');
-    await this.ensure(chatId);
     const until = untilOf(term);
     const reason = term.reason?.trim().slice(0, 300) || null;
-    await this.prisma.telegramSubscriber.update({
-      where: { chatId: BigInt(chatId) },
-      data: { bannedUntil: until, banReason: reason },
-    });
-    this.access.forget(chatId);
+    await this.accounts.setBan(id, until, reason);
+    this.access.forget(id, u.chatId);
     await this.logAction(
       adminId,
-      chatId,
+      id,
       'ban',
       `${fmt(until)}${reason ? ` · ${reason}` : ''}`,
     );
-    return this.user(chatId);
+    return this.user(id);
   }
 
-  async unban(adminId: number, chatId: string) {
-    await this.ensure(chatId);
-    await this.prisma.telegramSubscriber.update({
-      where: { chatId: BigInt(chatId) },
-      data: { bannedUntil: null, banReason: null },
-    });
-    this.access.forget(chatId);
-    await this.logAction(adminId, chatId, 'unban');
-    return this.user(chatId);
+  async unban(adminId: bigint, id: string) {
+    const u = await this.target(id);
+    await this.accounts.setBan(id, null, null);
+    this.access.forget(id, u.chatId);
+    await this.logAction(adminId, id, 'unban');
+    return this.user(id);
   }
 
-  /** Пользователь по id может ещё не быть в БД (не заходил) — создаём, чтобы выдать Pro/бан заранее. */
-  private ensure(chatId: string) {
-    const id = BigInt(chatId);
-    return this.prisma.telegramSubscriber.upsert({
-      where: { chatId: id },
-      create: { chatId: id },
-      update: {},
+  private async target(id: string) {
+    const u = await this.prisma.user.findUnique({
+      where: { id },
+      select: { chatId: true },
     });
+    if (!u) throw new NotFoundException('Пользователь не найден');
+    return u;
   }
 
   private logAction(
-    adminId: number,
-    chatId: string,
+    adminId: bigint,
+    userId: string,
     action: string,
     details?: string,
   ) {
     return this.prisma.adminLog.create({
-      data: {
-        adminId: BigInt(adminId),
-        targetId: BigInt(chatId),
-        action,
-        details,
-      },
+      data: { adminId, targetUserId: userId, action, details },
     });
   }
 }
@@ -344,10 +371,15 @@ export class AdminService {
 function publicLog(l: {
   id: string;
   adminId: bigint;
-  targetId: bigint;
+  targetId: bigint | null;
+  targetUserId: string | null;
   action: string;
   details: string | null;
   createdAt: Date;
 }) {
-  return { ...l, adminId: String(l.adminId), targetId: String(l.targetId) };
+  return {
+    ...l,
+    adminId: String(l.adminId),
+    targetId: l.targetId == null ? null : String(l.targetId),
+  };
 }

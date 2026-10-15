@@ -5,7 +5,6 @@ import { HttpModule } from '@nestjs/axios';
 import { TokenCipher } from 'src/common/crypto/token-cipher';
 import { UsersService } from 'src/users/users.service';
 import { StalcraftApiClient } from './api/stalcraft-api.client';
-import { StalzoneOAuthController } from './oauth/stalzone-oauth.controller';
 import { StalzoneOAuthService } from './oauth/stalzone-oauth.service';
 
 @Module({
@@ -19,13 +18,12 @@ import { StalzoneOAuthService } from './oauth/stalzone-oauth.service';
       httpsAgent: new https.Agent({ keepAlive: true, maxSockets: 64 }),
     }),
   ],
-  controllers: [StalzoneOAuthController],
   providers: [
     StalzoneOAuthService,
     StalcraftApiClient,
     UsersService,
     TokenCipher,
   ],
-  exports: [StalzoneOAuthService, StalcraftApiClient],
+  exports: [StalzoneOAuthService, StalcraftApiClient, UsersService],
 })
 export class StalzoneModule {}

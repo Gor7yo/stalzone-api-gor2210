@@ -104,6 +104,15 @@ export class StalzoneOAuthService {
     });
   }
 
+  /** Новый токен игрока по refresh_token (access живёт год, обновляем заранее). */
+  refreshUserToken(refreshToken: string) {
+    return this.requestToken({
+      grant_type: 'refresh_token',
+      refresh_token: refreshToken,
+      scope: '',
+    });
+  }
+
   private async requestToken(params: Record<string, string>) {
     const body = new URLSearchParams({
       client_id: this.configService.getOrThrow<string>('STALZONE_CLIENT_ID'),
