@@ -66,6 +66,8 @@ export class ApiService {
           additional: q.additional === 'true',
         },
         maxAgeMs,
+        // открытый предмет: снимок отдаём сразу, обновляем в фоне; «обновить» — ждёт свежий
+        !list && q.fresh !== 'true',
       )
       .catch(() => null);
     if (stored) return stored;

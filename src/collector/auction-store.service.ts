@@ -15,6 +15,8 @@ type Sale = AuctionItemHistoryResponse['prices'][number];
 const MAX_POINTS = 3_000;
 /** При выборке самые свежие сделки отдаём все (правый край графика, сделки за сутки). */
 const RECENT_POINTS = 600;
+/** Снимок лотов не старше этого сайт получает сразу, обновление — в фоне. */
+const STALE_MS = 10 * 60_000;
 
 export interface LotsQuery {
   region: string;
@@ -69,11 +71,30 @@ export class AuctionStore {
     return !!at && Date.now() - at.getTime() <= maxAgeMs;
   }
 
-  /** Последний снимок лотов (по возрастанию выкупа), при необходимости обновлённый. */
-  private async snapshot(region: string, itemId: string, maxAgeMs: number) {
+  /**
+   * Последний снимок лотов (по возрастанию выкупа), при необходимости обновлённый.
+   * staleOk: снимок не старше STALE_MS отдаём сразу, а обновляем в фоне — иначе человек ждёт
+   * все страницы EXBO (у модулей 25 запросов). Алерты и кнопка «обновить» ждут свежий.
+   */
+  private async snapshot(
+    region: string,
+    itemId: string,
+    maxAgeMs: number,
+    staleOk = false,
+  ) {
     if (!this.collector.enabled) return null;
     let item: TrackedItem | null = await this.tracked(region, itemId);
-    if (!this.isFresh(item?.lastLotsAt, maxAgeMs)) {
+    if (
+      staleOk &&
+      !this.isFresh(item?.lastLotsAt, maxAgeMs) &&
+      this.isFresh(item?.lastLotsAt, STALE_MS)
+    ) {
+      void this.collector
+        .refreshLots(region, itemId)
+        .catch((error) =>
+          this.logger.debug(`снимок ${region}:${itemId}: ${String(error)}`),
+        );
+    } else if (!this.isFresh(item?.lastLotsAt, maxAgeMs)) {
       try {
         await this.collector.refreshLots(region, itemId);
         item = await this.tracked(region, itemId);
@@ -128,10 +149,11 @@ export class AuctionStore {
   async lots(
     q: LotsQuery,
     maxAgeMs: number,
+    staleOk = false,
   ): Promise<AuctionItemLotsResponse | null> {
     if (!q.sort) return null;
     const cheapFirst = q.sort === 'buyout_price' && q.order !== 'desc';
-    const snap = await this.snapshot(q.region, q.item, maxAgeMs);
+    const snap = await this.snapshot(q.region, q.item, maxAgeMs, staleOk);
     if (!snap || (!snap.complete && !cheapFirst)) return null;
     if (!snap.complete && q.offset >= snap.lots.length) return null;
 
