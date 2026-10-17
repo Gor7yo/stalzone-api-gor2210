@@ -84,7 +84,9 @@ export class AuctionStore {
   ) {
     if (!this.collector.enabled) return null;
     let item: TrackedItem | null = await this.tracked(region, itemId);
-    if (
+    if (maxAgeMs === Infinity) {
+      // только БД: годится снимок любой давности, сами не обновляем
+    } else if (
       staleOk &&
       !this.isFresh(item?.lastLotsAt, maxAgeMs) &&
       this.isFresh(item?.lastLotsAt, STALE_MS)

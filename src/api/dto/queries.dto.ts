@@ -85,6 +85,14 @@ export class AuctionQueryDto extends PageQuery {
   @Min(5)
   @Max(3600)
   maxAge?: number;
+
+  /**
+   * Только то, что уже есть в нашей БД: без запроса к EXBO и без добавления в сборщик.
+   * Для сервера сайта (цена в описании страницы) — поисковые роботы не тратят квоту.
+   */
+  @IsOptional()
+  @IsBooleanString()
+  cached?: string;
 }
 
 export const HISTORY_PERIODS = ['day', 'week', 'month', 'year'] as const;

@@ -63,3 +63,20 @@ console.log(
     .map(([g, list]) => `${g} ${list.length}`)
     .join(', '),
 );
+
+// Названия и группы всех предметов (из базы EXBO через справочник фронтенда) — для текста
+// уведомлений бота и фильтра категорий во флиппере, в том числе для предметов не из стартового списка.
+const info = Object.fromEntries(
+  items.items.map(([id, name, , , cat]) => [id, [name, String(items.categories[cat] ?? '').split('/')[0]]]),
+);
+writeFileSync(
+  join(import.meta.dirname, '..', 'src', 'collector', 'item-info.ts'),
+  [
+    '// Сгенерировано scripts/build-tracked-seed.mjs — не править руками.',
+    '// id предмета → [русское название, группа] из базы EXBO (public/items.json фронтенда).',
+    '/* prettier-ignore */',
+    `export const ITEM_INFO: Record<string, [name: string, group: string]> = ${JSON.stringify(info)};`,
+    '',
+  ].join('\n'),
+);
+console.log(`item-info.ts: ${items.items.length} предметов`);

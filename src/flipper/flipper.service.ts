@@ -1,6 +1,6 @@
 import { Injectable } from '@nestjs/common';
 import { TtlCache } from 'src/common/cache/ttl-cache';
-import { SEED_ITEMS } from 'src/collector/seed-items';
+import { ITEM_INFO } from 'src/collector/item-info';
 import { PrismaService } from 'src/prisma/prisma.service';
 import {
   FEE,
@@ -56,8 +56,6 @@ interface LotRow {
   endTime: Date;
   seenAt: Date;
 }
-
-const SEED_BY_ID = new Map(SEED_ITEMS.map((s) => [s.id, s]));
 
 /** Ступени заточки — как на фронте (TIERS): +0, +1–4, +5–9, +10–14, +15. */
 const tierOf = (u: number) =>
@@ -158,12 +156,13 @@ export class FlipperService {
       const pct = (profit / buyout) * 100;
       if (profit < MIN_PROFIT || pct < MIN_PCT) continue;
 
-      const seed = SEED_BY_ID.get(lot.itemId);
+      // название и группа — из справочника EXBO по всем предметам (не только стартовый список)
+      const info = ITEM_INFO[lot.itemId];
       flips.push({
         key: `${lot.itemId}|${lot.quality}|${lot.upgrade}|${amount}|${buyout}|${lot.endTime.getTime()}${lot.variant ? `|${lot.variant}` : ''}`,
         itemId: lot.itemId,
-        name: seed?.name,
-        group: seed?.group,
+        name: info?.[0],
+        group: info?.[1],
         quality: lot.quality,
         upgrade: lot.upgrade,
         ...(lot.variant && { variant: lot.variant }),

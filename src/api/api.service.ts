@@ -44,6 +44,25 @@ export class ApiService {
    * (сортировка глубже 200 самых дешёвых на большом рынке, сборщик выключен).
    */
   async getAuctionItemLots(q: AuctionQueryDto) {
+    // cached: только снимок из БД любой давности — без EXBO и без сборщика (сервер сайта, роботы)
+    if (q.cached === 'true') {
+      const stored = await this.store
+        .lots(
+          {
+            region: q.region,
+            item: q.item,
+            sort: q.sort,
+            order: q.order,
+            limit: q.limit ?? 20,
+            offset: q.offset ?? 0,
+            additional: q.additional === 'true',
+          },
+          Infinity,
+        )
+        .catch(() => null);
+      return stored ?? { total: 0, lots: [] };
+    }
+
     // maxAge передают списки цен: такой предмет только добавляем в сборщик;
     // открытый предмет сборщик держит свежим чаще (ответ не ждёт записи)
     const list = q.maxAge !== undefined;
