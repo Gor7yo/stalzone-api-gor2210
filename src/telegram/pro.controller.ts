@@ -13,6 +13,7 @@ import { IsIn, IsInt, IsOptional, Matches, Max, Min } from 'class-validator';
 import { REGIONS, type Region } from 'src/api/dto/queries.dto';
 import { ServerGuard } from 'src/common/guards/server.guard';
 import { FlipperService } from 'src/flipper/flipper.service';
+import { SaleTimingService } from 'src/flipper/sale-timing.service';
 import { SellAdvisorService } from 'src/flipper/sell-advisor.service';
 import { ProService } from './pro.service';
 import { AccountGuard, type AccountRequest } from './account.guard';
@@ -93,6 +94,7 @@ export class SellController {
   constructor(
     private readonly pro: ProService,
     private readonly advisor: SellAdvisorService,
+    private readonly timingService: SaleTimingService,
   ) {}
 
   @Get('advice')
@@ -106,6 +108,20 @@ export class SellController {
       upgrade: query.upgrade ?? 0,
       variant: query.variant ?? '',
       amount: query.amount ?? 1,
+    });
+  }
+
+  /** «Когда выгоднее продавать»: цена и сделки по часам суток и дням недели. */
+  @Get('timing')
+  @Header('Cache-Control', 'private, max-age=300')
+  async timing(@Req() req: AccountRequest, @Query() query: SellQueryDto) {
+    await this.pro.require(req.account.userId);
+    return this.timingService.get({
+      region: query.region,
+      itemId: query.item,
+      quality: query.quality ?? -1,
+      upgrade: query.upgrade ?? 0,
+      variant: query.variant ?? '',
     });
   }
 }

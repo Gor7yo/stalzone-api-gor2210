@@ -1,6 +1,7 @@
 import { Module } from '@nestjs/common';
 import { CollectorModule } from 'src/collector/collector.module';
 import { FlipperService } from './flipper.service';
+import { SaleTimingService } from './sale-timing.service';
 import { SellAdvisorService } from './sell-advisor.service';
 
 /**
@@ -9,7 +10,7 @@ import { SellAdvisorService } from './sell-advisor.service';
  */
 @Module({
   imports: [CollectorModule],
-  providers: [FlipperService, SellAdvisorService],
-  exports: [FlipperService, SellAdvisorService],
+  providers: [FlipperService, SellAdvisorService, SaleTimingService],
+  exports: [FlipperService, SellAdvisorService, SaleTimingService],
 })
 export class FlipperModule {}
