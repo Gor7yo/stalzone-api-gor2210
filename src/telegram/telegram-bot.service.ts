@@ -47,6 +47,8 @@ export interface TgMessage {
 export interface TgUpdate {
   update_id: number;
   message?: TgMessage;
+  /** «@бот запрос» в любом чате (inline-режим включается в @BotFather: /setinline) */
+  inline_query?: { id: string; query: string; from: { id: number } };
   callback_query?: {
     id: string;
     data?: string;
@@ -82,6 +84,8 @@ export class TelegramBotService
   private readonly rich: boolean;
   /** Адрес сайта: мини-приложение (кнопки web_app) и картинки в меню. */
   readonly siteUrl: string;
+  /** @username бота без «@» — для ссылок t.me (уточняется через getMe при старте). */
+  username = 'stalzoneinfo_bot';
   private handler?: (update: TgUpdate) => Promise<void>;
   private abort?: AbortController;
   private stopped = false;
@@ -125,6 +129,11 @@ export class TelegramBotService
 
   /** Команды, описание и кнопка меню (слева от поля ввода) — при каждом старте, вызовы идемпотентны. */
   private async setupProfile() {
+    await this.call<{ username?: string }>('getMe')
+      .then((me) => {
+        if (me.username) this.username = me.username;
+      })
+      .catch((e: Error) => this.logger.warn(`getMe: ${e.message}`));
     const steps: [string, Record<string, unknown>][] = [
       [
         'setMyCommands',
@@ -340,7 +349,7 @@ export class TelegramBotService
           {
             offset,
             timeout: 25,
-            allowed_updates: ['message', 'callback_query'],
+            allowed_updates: ['message', 'callback_query', 'inline_query'],
           },
           35_000,
         );

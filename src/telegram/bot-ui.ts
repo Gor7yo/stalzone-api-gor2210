@@ -21,7 +21,7 @@ export type Block =
 export type ButtonStyle = 'primary' | 'success' | 'danger';
 
 export type Button = { text: string; style?: ButtonStyle } & (
-  { data: string } | { url: string } | { webApp: string }
+  { data: string } | { url: string } | { webApp: string } | { copy: string }
 );
 
 export interface Screen {
@@ -108,7 +108,9 @@ export function toKeyboard(buttons: Button[][] = []) {
         ? { callback_data: b.data }
         : 'url' in b
           ? { url: b.url }
-          : { web_app: { url: b.webApp } }),
+          : 'copy' in b
+            ? { copy_text: { text: b.copy } }
+            : { web_app: { url: b.webApp } }),
     })),
   );
 }

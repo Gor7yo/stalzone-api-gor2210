@@ -64,18 +64,21 @@ console.log(
     .join(', '),
 );
 
-// Названия и группы всех предметов (из базы EXBO через справочник фронтенда) — для текста
-// уведомлений бота и фильтра категорий во флиппере, в том числе для предметов не из стартового списка.
+// Названия, группы и категории всех предметов (из базы EXBO через справочник фронтенда) — для текста
+// уведомлений бота, фильтра категорий во флиппере и inline-поиска в боте (категория — путь к иконке).
 const info = Object.fromEntries(
-  items.items.map(([id, name, , , cat]) => [id, [name, String(items.categories[cat] ?? '').split('/')[0]]]),
+  items.items.map(([id, name, nameEn, , cat]) => {
+    const category = String(items.categories[cat] ?? '');
+    return [id, [name, category.split('/')[0], category, nameEn || name]];
+  }),
 );
 writeFileSync(
   join(import.meta.dirname, '..', 'src', 'collector', 'item-info.ts'),
   [
     '// Сгенерировано scripts/build-tracked-seed.mjs — не править руками.',
-    '// id предмета → [русское название, группа] из базы EXBO (public/items.json фронтенда).',
+    '// id предмета → [русское название, группа, категория, английское название] из базы EXBO (public/items.json фронтенда).',
     '/* prettier-ignore */',
-    `export const ITEM_INFO: Record<string, [name: string, group: string]> = ${JSON.stringify(info)};`,
+    `export const ITEM_INFO: Record<string, [name: string, group: string, category: string, nameEn: string]> = ${JSON.stringify(info)};`,
     '',
   ].join('\n'),
 );

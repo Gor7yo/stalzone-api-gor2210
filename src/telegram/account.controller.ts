@@ -21,6 +21,7 @@ import { AccountService } from './account.service';
 import { ExboLoginService } from './exbo-login.service';
 import { ProService } from './pro.service';
 import { TelegramBotService } from './telegram-bot.service';
+import { ReferralService } from './referral.service';
 import { WebLinkService } from './web-link.service';
 
 class CompleteDto {
@@ -78,6 +79,7 @@ export class MeController {
     private readonly accounts: AccountService,
     private readonly webLink: WebLinkService,
     private readonly bot: TelegramBotService,
+    private readonly referrals: ReferralService,
   ) {}
 
   @Get()
@@ -113,6 +115,13 @@ export class MeController {
   @Header('Cache-Control', 'no-store')
   trial(@Req() req: AccountRequest) {
     return this.pro.startTrial(req.account.userId);
+  }
+
+  /** Реферальная ссылка и счётчики приглашений. */
+  @Get('referral')
+  @Header('Cache-Control', 'no-store')
+  referral(@Req() req: AccountRequest) {
+    return this.referrals.stats(req.account.userId);
   }
 
   @Post('characters/refresh')

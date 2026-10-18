@@ -170,7 +170,20 @@ export interface ProData {
   pro: boolean;
   proUntil: string | null;
   trialAvailable: boolean;
+  /** реферальная ссылка — только для привязанного аккаунта */
+  referral?: {
+    link: string;
+    invited: number;
+    rewardedMonth: number;
+    monthLimit: number;
+    bonusDays: number;
+    trialDays: number;
+  };
 }
+
+/** Кнопка «Поделиться»: Telegram откроет выбор чата с готовым текстом и ссылкой. */
+const shareUrl = (link: string, text: string) =>
+  `https://t.me/share/url?url=${encodeURIComponent(link)}&text=${encodeURIComponent(text)}`;
 
 export function proScreen(d: ProData): Screen {
   const blocks: Screen['blocks'] = [
@@ -220,8 +233,74 @@ export function proScreen(d: ProData): Screen {
   } else {
     buttons.push([{ text: `💳 Продлить - ${PRICE}`, url: PRO_BUY_URL }]);
   }
+  const r = d.referral;
+  if (r) {
+    blocks.push(
+      { type: 'h', text: '🤝 Пригласи друга' },
+      {
+        type: 'p',
+        text: `Друг получит <b>${r.trialDays} дня Pro</b>, а вы - <b>+${r.bonusDays} день</b> за каждого, кто придёт по ссылке и привяжет Telegram.`,
+      },
+      {
+        type: 'table',
+        head: ['', ''],
+        rows: [
+          ['Ваша ссылка', `<code>${esc(r.link)}</code>`],
+          ['Приглашено', String(r.invited)],
+          ['Бонусов за 30 дней', `${r.rewardedMonth} из ${r.monthLimit}`],
+        ],
+      },
+    );
+    buttons.push([
+      {
+        text: '📤 Поделиться',
+        url: shareUrl(
+          r.link,
+          `Цены, флиппер и алерты STALZONE в Telegram. По ссылке - ${r.trialDays} дня Pro бесплатно.`,
+        ),
+        style: 'success',
+      },
+      { text: '📋 Скопировать', copy: r.link },
+    ]);
+  }
   buttons.push(back());
   return { blocks, buttons };
+}
+
+/** Приветствие по реферальной ссылке: что сделать, чтобы получить пробный. */
+export function referralWelcomeScreen(
+  site: string,
+  inviter: string,
+  trialDays: number,
+): Screen {
+  return {
+    blocks: [
+      { type: 'banner', src: `${site}/opengraph-image.png` },
+      { type: 'h', text: `🎁 Вас пригласил ${esc(inviter)}` },
+      {
+        type: 'p',
+        text: `Вам положено <b>${trialDays} дня Pro бесплатно</b>: флиппер, флип-алерты, 20 ценовых алертов и графики.`,
+      },
+      {
+        type: 'list',
+        items: [
+          'Откройте STALZONE INFO кнопкой ниже',
+          'Войдите через EXBO - пароль вводится только на сайте EXBO',
+          'Привяжите этот Telegram - Pro включится сам',
+        ],
+      },
+    ],
+    buttons: [
+      [
+        {
+          text: '🔗 Войти и получить Pro',
+          webApp: `${site}/account`,
+          style: 'success',
+        },
+      ],
+      [{ text: '🏠 Меню', data: 'menu' }],
+    ],
+  };
 }
 
 const STATUS: Record<string, string> = {

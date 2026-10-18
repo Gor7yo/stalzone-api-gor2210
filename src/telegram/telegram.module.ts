@@ -19,6 +19,8 @@ import {
   ProAdminController,
 } from './pro.controller';
 import { ProService } from './pro.service';
+import { InlineService } from './inline.service';
+import { ReferralService } from './referral.service';
 import { SupportService } from './support.service';
 import { TelegramBotService } from './telegram-bot.service';
 import { TributeController } from './tribute.controller';
@@ -55,6 +57,8 @@ import { WebLinkService } from './web-link.service';
     WebLinkService,
     ProService,
     SupportService,
+    ReferralService,
+    InlineService,
   ],
 })
 export class TelegramModule {}

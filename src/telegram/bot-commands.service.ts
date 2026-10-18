@@ -9,6 +9,7 @@ import {
   mainMenu,
   newTicketScreen,
   proScreen,
+  referralWelcomeScreen,
   replyPromptScreen,
   supportScreen,
   ticketCreatedScreen,
@@ -16,7 +17,9 @@ import {
 } from './bot-screens';
 import { esc, type Screen } from './bot-ui';
 import { REGION_LABEL } from './format';
-import { PRICE_ALERT_LIMIT, ProService } from './pro.service';
+import { PRICE_ALERT_LIMIT, ProService, TRIAL_DAYS } from './pro.service';
+import { InlineService } from './inline.service';
+import { ReferralService } from './referral.service';
 import { type Category, isCategory } from './support-categories';
 import { isNote, SupportLimitError, SupportService } from './support.service';
 import {
@@ -49,6 +52,8 @@ export class BotCommandsService implements OnModuleInit {
     private readonly pro: ProService,
     private readonly support: SupportService,
     private readonly prisma: PrismaService,
+    private readonly referrals: ReferralService,
+    private readonly inline: InlineService,
   ) {}
 
   onModuleInit() {
@@ -59,6 +64,7 @@ export class BotCommandsService implements OnModuleInit {
   }
 
   private async handle(update: TgUpdate) {
+    if (update.inline_query) return this.inline.answer(update.inline_query);
     if (update.callback_query) return this.handleCallback(update);
     const msg = update.message;
     if (!msg?.from || msg.from.is_bot) return;
@@ -110,6 +116,19 @@ export class BotCommandsService implements OnModuleInit {
         if (payload.startsWith('link_'))
           return this.askLink(chatId, payload.slice(5));
         if (payload === 'support') return this.go(chatId, 'sup');
+        // t.me/<бот>?start=ref_<код> — пришёл по приглашению
+        if (payload.startsWith('ref_')) {
+          const inviter = await this.referrals.remember(
+            chatId,
+            payload.slice(4),
+          );
+          if (inviter) {
+            return void this.bot.show(
+              chatId,
+              referralWelcomeScreen(this.bot.siteUrl, inviter, TRIAL_DAYS),
+            );
+          }
+        }
         return this.go(chatId, 'menu');
       }
       case '/menu':
@@ -249,7 +268,8 @@ export class BotCommandsService implements OnModuleInit {
         const status = user
           ? await this.pro.status(user.id)
           : await this.pro.chatStatus(BigInt(chatId));
-        return proScreen({ site, linked: !!user, ...status });
+        const referral = user ? await this.referrals.stats(user.id) : undefined;
+        return proScreen({ site, linked: !!user, ...status, referral });
       }
       case 'sup': {
         const tickets = await this.support.list(chatId);

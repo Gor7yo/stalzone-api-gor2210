@@ -1,6 +1,7 @@
 import { createHash, randomBytes } from 'node:crypto';
 import { Injectable, Logger } from '@nestjs/common';
 import { PrismaService } from 'src/prisma/prisma.service';
+import { ReferralService } from './referral.service';
 
 /** Сессию сайта, которой не пользовались полгода, считаем брошенной. */
 const SESSION_IDLE_MS = 180 * 86_400_000;
@@ -36,7 +37,10 @@ const toAccount = (u: {
 export class AccountService {
   private readonly logger = new Logger(AccountService.name);
 
-  constructor(private readonly prisma: PrismaService) {}
+  constructor(
+    private readonly prisma: PrismaService,
+    private readonly referrals: ReferralService,
+  ) {}
 
   // ---------- сессии ----------
 
@@ -157,6 +161,10 @@ export class AccountService {
       });
     });
     this.logger.log(`Telegram привязан к аккаунту ${userId}`);
+    // пришёл по реферальной ссылке — пробный другу и день Pro пригласившему
+    await this.referrals
+      .onLinked(userId, chatId)
+      .catch((e: Error) => this.logger.error(`реферал: ${e.message}`, e.stack));
   }
 
   /** Отвязать Telegram: Pro аккаунта с чата снимается, алерты чата остаются (без Pro - в бесплатных лимитах). */

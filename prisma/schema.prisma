@@ -40,6 +40,8 @@ model User {
   banReason   String?   @map("ban_reason")
   /// Последний визит (не чаще раза в 10 мин)
   lastSeenAt  DateTime? @map("last_seen_at")
+  /// Код реферальной ссылки t.me/<бот>?start=ref_<код>; создаётся при первом запросе ссылки
+  refCode     String?   @unique @map("ref_code")
 
   createdAt       DateTime            @default(now())
   updatedAt       DateTime            @updatedAt
@@ -210,6 +212,8 @@ model TelegramSubscriber {
   banReason       String?
   /// Последний визит в мини-приложение / на сайт (обновляется не чаще раза в 10 мин)
   lastSeenAt      DateTime?
+  /// Пришёл по реферальной ссылке этого аккаунта (User.id); засчитывается при привязке Telegram
+  referredBy      String?
 
   createdAt   DateTime     @default(now())
   updatedAt   DateTime     @updatedAt
@@ -219,6 +223,21 @@ model TelegramSubscriber {
   exboUser    User?
 
   @@map("telegram_subscribers")
+}
+
+/// Приглашение по реферальной ссылке: один раз на приглашённый аккаунт.
+model Referral {
+  id        String   @id @default(uuid())
+  inviterId String
+  /// Приглашённый аккаунт — засчитывается один раз
+  inviteeId String   @unique
+  chatId    BigInt
+  /// Пригласившему начислен день Pro (false — упёрся в лимит за 30 дней)
+  rewarded  Boolean
+  createdAt DateTime @default(now())
+
+  @@index([inviterId, createdAt])
+  @@map("referrals")
 }
 
 /// Обращение в поддержку из бота. В группе поддержки у каждого - своя тема (topicId).
