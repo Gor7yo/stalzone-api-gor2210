@@ -20,6 +20,15 @@ export const MODULE_STATS: Record<string, string> = {
   draw_time_aff: 'Экстрактор',
   aiming_speed_modifier_aff: 'Оператор',
   equipped_speed_modifier_aff: 'Слайдер',
+  // свои id в лотах EXBO — сопоставлены по скриншотам из игры (18.10.2026)
+  acceleration: 'Термос',
+  finish: 'Завершитель',
+  inside: 'Компрессор',
+  inside2: 'Декомпрессор',
+  equalizer_op: 'Палач',
+  surge: 'Пробойник',
+  berserk: 'Агрессор',
+  concentration: 'Губитель',
 };
 
 /** «Снайпер» - в кавычках, как в игре */
