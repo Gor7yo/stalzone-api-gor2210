@@ -7,7 +7,7 @@ import { PrismaService } from 'src/prisma/prisma.service';
 
 const DAY = 86_400_000;
 
-/** Пробный Pro: дней, один раз на аккаунт (и на Telegram). */
+/** Пробный Pro: дней, один раз на аккаунт и на Telegram; без привязанного Telegram не выдаётся. */
 export const TRIAL_DAYS = 3;
 
 /** Ценовых алертов: бесплатно / в Pro. */
@@ -41,6 +41,9 @@ const statusOf = (
     trialAvailable: !pro && !trialUsedAt,
   };
 };
+
+/** Откат транзакции пробного: на аккаунте или Telegram он уже был. */
+class TrialUsed extends Error {}
 
 const proRequired = () =>
   new ForbiddenException({
@@ -80,7 +83,7 @@ export class ProService {
   async startTrial(userId: string) {
     const user = await this.prisma.user.findUniqueOrThrow({
       where: { id: userId },
-      select: { proUntil: true, subscriber: { select: { trialUsedAt: true } } },
+      select: { proUntil: true, chatId: true },
     });
     if (isProActive(user.proUntil)) {
       throw new ConflictException({
@@ -89,13 +92,34 @@ export class ProService {
         message: 'Pro уже активен',
       });
     }
-    const { count } = user.subscriber?.trialUsedAt
-      ? { count: 0 }
-      : await this.prisma.user.updateMany({
-          where: { id: userId, trialUsedAt: null },
-          data: { trialUsedAt: new Date() },
+    // твинк EXBO заводится за минуту, Telegram - нет: пробный один на Telegram
+    const chatId = user.chatId;
+    if (chatId == null) {
+      throw new ConflictException({
+        statusCode: 409,
+        code: 'telegram_required',
+        message: 'Пробный период - после привязки Telegram',
+      });
+    }
+    const now = new Date();
+    const taken = await this.prisma
+      .$transaction(async (tx) => {
+        const chat = await tx.telegramSubscriber.updateMany({
+          where: { chatId, trialUsedAt: null },
+          data: { trialUsedAt: now },
         });
-    if (!count) {
+        const own = await tx.user.updateMany({
+          where: { id: userId, trialUsedAt: null },
+          data: { trialUsedAt: now },
+        });
+        if (!chat.count || !own.count) throw new TrialUsed();
+        return true;
+      })
+      .catch((e: unknown) => {
+        if (e instanceof TrialUsed) return false;
+        throw e;
+      });
+    if (!taken) {
       throw new ConflictException({
         statusCode: 409,
         code: 'trial_used',
