@@ -2,6 +2,7 @@ import { Injectable } from '@nestjs/common';
 import { ClansService, type ClanPage } from 'src/clans/clans.service';
 import { AuctionStore } from 'src/collector/auction-store.service';
 import { CollectorService } from 'src/collector/collector.service';
+import { PlayersService } from 'src/players/players.service';
 import { StalcraftApiClient } from 'src/stalzone/api/stalcraft-api.client';
 import {
   AuctionItemHistoryResponse,
@@ -37,6 +38,7 @@ export class ApiService {
     private readonly collector: CollectorService,
     private readonly store: AuctionStore,
     private readonly clans: ClansService,
+    private readonly players: PlayersService,
   ) {}
 
   /**
@@ -116,12 +118,15 @@ export class ApiService {
     );
   }
 
-  getPlayerInfo(q: CharacterQueryDto) {
-    return this.stalcraft.get<unknown>(
+  /** Профиль игрока; заодно снимок статистики для прогресса (в фоне, ответ не ждёт). */
+  async getPlayerInfo(q: CharacterQueryDto) {
+    const profile = await this.stalcraft.get<unknown>(
       [q.region, 'character', 'by-name', q.username, 'profile'],
       {},
       TTL.character,
     );
+    void this.players.viewed(q.region, profile);
+    return profile;
   }
 
   getClanInformation(q: ClanInfoQueryDto) {

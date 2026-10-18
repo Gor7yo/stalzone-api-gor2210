@@ -135,6 +135,37 @@ model Clan {
   @@map("clans")
 }
 
+/// Игрок, за прогрессом которого следим: его профиль открывали на сайте.
+/// Раз в сутки PlayersService обновляет тех, кого смотрели за последние 30 дней (фоновой квотой EXBO).
+model TrackedCharacter {
+  region       String
+  uuid         String
+  username     String
+  /// ник в нижнем регистре, ё → е — поиск прогресса по нику
+  usernameKey  String   @map("username_key")
+  lastViewedAt DateTime @map("last_viewed_at")
+  refreshedAt  DateTime @map("refreshed_at")
+
+  @@id([region, uuid])
+  @@index([region, usernameKey])
+  @@index([lastViewedAt])
+  @@map("tracked_characters")
+}
+
+/// Статистика игрока на конец дня (МСК): последний снимок дня перезаписывает предыдущий.
+/// stats — { [id статы EXBO]: число }, только числовые (без дат). Храним 120 дней.
+model CharacterSnapshot {
+  region String
+  uuid   String
+  day    DateTime @db.Date
+  at     DateTime
+  stats  Json
+
+  @@id([region, uuid, day])
+  @@index([day])
+  @@map("character_snapshots")
+}
+
 /// История клана для метрик (бойцы, уровень). Пишет ClansService при синхронизации раз в час —
 /// только для нового клана и если изменились бойцы или уровень. Между снимками значения не менялись.
 /// Почасовые точки старше 14 дней сжимаются до последней точки дня.
