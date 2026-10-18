@@ -1,4 +1,5 @@
 import { Injectable } from '@nestjs/common';
+import { ITEM_INFO } from 'src/collector/item-info';
 import { TtlCache } from 'src/common/cache/ttl-cache';
 import { PrismaService } from 'src/prisma/prisma.service';
 
@@ -20,6 +21,8 @@ const INDEX_CLIP = 0.5;
 
 export interface RadarRow {
   itemId: string;
+  /** русское название из справочника EXBO — чтобы фронт и поисковики видели имя до загрузки индекса */
+  name?: string;
   /** -1 — без качества */
   quality: number;
   /** ступень заточки: 0 — +0, 1 — +1…4, 2 — +5…9, 3 — +10…14, 4 — +15 */
@@ -105,6 +108,7 @@ export class MarketService {
           r.prev_n >= MIN_DEALS && r.prev_med != null && r.prev_med > 0;
         return {
           itemId: r.itemId,
+          name: ITEM_INFO[r.itemId]?.[0],
           quality: r.quality,
           tier: r.tier,
           price: Math.round(r.cur_med!),
