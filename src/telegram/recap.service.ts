@@ -91,7 +91,7 @@ interface LinkedCharacter {
 }
 
 /**
- * Итоги месяца в боте: 1-го числа картинка-сторис «Твой октябрь в Зоне» каждому, кто привязал
+ * Итоги месяца в боте: 1-го числа картинка «Твой октябрь в Зоне» каждому, кто привязал
  * Telegram к аккаунту EXBO (по его персонажам). /recap — итоги текущего месяца по запросу.
  * Выключено локально (NODE_ENV=test) и при RECAP=false.
  */
@@ -230,7 +230,7 @@ export class RecapService implements OnApplicationBootstrap, OnModuleDestroy {
       const name = encodeURIComponent(c.name);
       const page = `${this.bot.siteUrl}/character/${c.region}/${name}/recap/${month}`;
       // картинку рисует сайт; v= — чтобы Telegram не взял из кеша картинку прошлой версии
-      const photo = `${this.bot.siteUrl}/story/${c.region}/${name}/${month}?v=${r.to}`;
+      const photo = `${page}/opengraph-image?v=${r.to}`;
       const buttons: InlineButton[][] = [
         [{ text: '📲 Открыть и поделиться', url: page }],
         onDemand && off

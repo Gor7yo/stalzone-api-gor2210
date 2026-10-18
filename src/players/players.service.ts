@@ -242,7 +242,7 @@ export class PlayersService implements OnApplicationBootstrap, OnModuleDestroy {
 
   // ---------- итоги месяца ----------
 
-  /** Итоги месяца по нику (страница и картинка-сторис). */
+  /** Итоги месяца по нику (страница итогов и её картинка). */
   async recap(region: string, username: string, month: string) {
     const tracked = await this.prisma.trackedCharacter.findFirst({
       where: { region, usernameKey: usernameKey(username) },
