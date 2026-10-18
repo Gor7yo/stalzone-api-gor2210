@@ -19,6 +19,7 @@ import { esc, type Screen } from './bot-ui';
 import { REGION_LABEL } from './format';
 import { PRICE_ALERT_LIMIT, ProService, TRIAL_DAYS } from './pro.service';
 import { InlineService } from './inline.service';
+import { RecapService } from './recap.service';
 import { ReferralService } from './referral.service';
 import { type Category, isCategory } from './support-categories';
 import { isNote, SupportLimitError, SupportService } from './support.service';
@@ -54,6 +55,7 @@ export class BotCommandsService implements OnModuleInit {
     private readonly prisma: PrismaService,
     private readonly referrals: ReferralService,
     private readonly inline: InlineService,
+    private readonly recap: RecapService,
   ) {}
 
   onModuleInit() {
@@ -140,6 +142,8 @@ export class BotCommandsService implements OnModuleInit {
         return this.go(chatId, 'em');
       case '/pro':
         return this.go(chatId, 'pro');
+      case '/recap':
+        return this.recap.onDemand(chatId);
       case '/support':
         await this.alerts.upsertSubscriber(from);
         return this.go(chatId, 'sup');
@@ -353,6 +357,18 @@ export class BotCommandsService implements OnModuleInit {
       return this.supportCallback(q.from, arg, extra, value, edit, answer);
 
     switch (action) {
+      // кнопка под итогами месяца: сообщение — картинка, его не редактируем, только ответ-подсказка
+      case 'recap': {
+        const off = arg === 'off';
+        const ok = await this.recap.setOff(chatId, off);
+        if (!ok) return answer('Аккаунт не привязан');
+        return answer(
+          off
+            ? 'Больше не пришлём. Включить - командой /recap'
+            : 'Итоги будут приходить 1-го числа',
+          true,
+        );
+      }
       case 'menu':
       case 'alerts':
       case 'pro':

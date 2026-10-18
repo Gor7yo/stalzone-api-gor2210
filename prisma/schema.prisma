@@ -42,6 +42,8 @@ model User {
   lastSeenAt  DateTime? @map("last_seen_at")
   /// Код реферальной ссылки t.me/<бот>?start=ref_<код>; создаётся при первом запросе ссылки
   refCode     String?   @unique @map("ref_code")
+  /// Не присылать в бот итоги месяца (кнопка «Не присылать итоги»)
+  recapOff    Boolean   @default(false) @map("recap_off")
 
   createdAt       DateTime            @default(now())
   updatedAt       DateTime            @updatedAt

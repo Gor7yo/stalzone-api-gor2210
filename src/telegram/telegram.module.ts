@@ -1,6 +1,7 @@
 import { Module } from '@nestjs/common';
 import { CollectorModule } from 'src/collector/collector.module';
 import { FlipperModule } from 'src/flipper/flipper.module';
+import { PlayersModule } from 'src/players/players.module';
 import { StalzoneModule } from 'src/stalzone/stalzone.module';
 import { AccessService } from './access.service';
 import { AuthController, MeController } from './account.controller';
@@ -21,6 +22,7 @@ import {
 import { ProService } from './pro.service';
 import { InlineService } from './inline.service';
 import { MonitorService } from './monitor.service';
+import { RecapService } from './recap.service';
 import { ReferralService } from './referral.service';
 import { SupportService } from './support.service';
 import { TelegramBotService } from './telegram-bot.service';
@@ -33,7 +35,7 @@ import { WebLinkService } from './web-link.service';
  * Без TELEGRAM_BOT_TOKEN бот и алерты выключены, вход через EXBO работает.
  */
 @Module({
-  imports: [StalzoneModule, CollectorModule, FlipperModule],
+  imports: [StalzoneModule, CollectorModule, FlipperModule, PlayersModule],
   controllers: [
     AuthController,
     MeController,
@@ -61,6 +63,7 @@ import { WebLinkService } from './web-link.service';
     ReferralService,
     InlineService,
     MonitorService,
+    RecapService,
   ],
 })
 export class TelegramModule {}

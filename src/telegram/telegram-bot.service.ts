@@ -143,6 +143,7 @@ export class TelegramBotService
             { command: 'alerts', description: 'Мои алерты' },
             { command: 'emission', description: 'Уведомления о выбросе' },
             { command: 'pro', description: 'Подписка Pro' },
+            { command: 'recap', description: 'Итоги месяца в Зоне' },
             { command: 'support', description: 'Написать в поддержку' },
             { command: 'stop', description: 'Отключить все уведомления' },
           ],
@@ -262,6 +263,50 @@ export class TelegramBotService
         } else {
           this.logger.warn(
             `sendMessage → ${Number(chatId)}: ${error.code} ${error.message}`,
+          );
+        }
+        return false;
+      }
+    }
+    return false;
+  }
+
+  /**
+   * Картинка по ссылке с подписью (HTML). Telegram сам скачивает картинку по url.
+   * false — не доставлено (бот заблокирован, Telegram не смог скачать картинку и т.п.).
+   */
+  async sendPhoto(
+    chatId: number | bigint,
+    photoUrl: string,
+    captionHtml: string,
+    buttons: InlineButton[][] = [],
+  ): Promise<boolean> {
+    const body = {
+      chat_id: Number(chatId),
+      photo: photoUrl,
+      caption: captionHtml,
+      parse_mode: 'HTML',
+      ...(buttons.length && { reply_markup: { inline_keyboard: buttons } }),
+    };
+    for (let attempt = 0; attempt < 2; attempt++) {
+      try {
+        // картинку Telegram рисует сайт — даём ему время
+        await this.call('sendPhoto', body, 30_000);
+        return true;
+      } catch (error) {
+        if (!(error instanceof TelegramApiError)) {
+          this.logger.warn(`sendPhoto → ${Number(chatId)}: ${String(error)}`);
+          return false;
+        }
+        if (error.code === 429 && attempt === 0) {
+          await sleep(Math.min((error.retryAfter ?? 1) * 1000, 30_000));
+          continue;
+        }
+        if (error.code === 403 || /chat not found/i.test(error.message)) {
+          await this.onBlocked?.(Number(chatId));
+        } else {
+          this.logger.warn(
+            `sendPhoto → ${Number(chatId)}: ${error.code} ${error.message}`,
           );
         }
         return false;
