@@ -43,6 +43,16 @@ export class StalcraftApiClient {
   /** Общая квота STALCRAFT API на всё приложение (люди + сборщик). */
   readonly budget: TokenBudget;
   private loggedLimitHeaders = false;
+  /** Время сбоев EXBO (5xx, сеть, 401 после повтора) — для мониторинга; 404/400/429 не сбои. */
+  private readonly failures: number[] = [];
+
+  /** Сколько сбоев EXBO было за последние ms. */
+  failuresSince(ms: number) {
+    const from = Date.now() - ms;
+    while (this.failures.length && this.failures[0] < from)
+      this.failures.shift();
+    return this.failures.length;
+  }
 
   constructor(
     private readonly http: HttpService,
@@ -167,6 +177,11 @@ export class StalcraftApiClient {
       }
 
       this.logger.warn(`STALCRAFT API ${status ?? error.code} ← /${path}`);
+      if (!status || status >= 500 || status === 401) {
+        this.failures.push(Date.now());
+        // держим только недавние — счётчик не растёт бесконечно
+        if (this.failures.length > 1000) this.failures.shift();
+      }
       throw this.toHttpException(status, error.code);
     }
   }
