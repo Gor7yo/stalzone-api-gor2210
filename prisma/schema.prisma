@@ -221,6 +221,48 @@ model TelegramSubscriber {
   @@map("telegram_subscribers")
 }
 
+/// Обращение в поддержку из бота. В группе поддержки у каждого - своя тема (topicId).
+model SupportTicket {
+  id       Int     @id @default(autoincrement())
+  chatId   BigInt
+  /// Аккаунт EXBO, если Telegram привязан (для карточки в группе)
+  userId   String?
+  /// question | payment | bug | idea
+  category String
+  /// open - ждёт ответа, answered - ответили, closed - закрыто
+  status   String  @default("open")
+  /// Тема в группе поддержки; null - группа не настроена или тему создать не удалось
+  topicId  Int?
+  /// Оценка после закрытия: 1 - помогли, -1 - нет; null - не оценили
+  rating   Int?
+
+  createdAt DateTime  @default(now())
+  updatedAt DateTime  @updatedAt
+  closedAt  DateTime?
+
+  messages SupportMessage[]
+
+  @@index([chatId, status])
+  @@index([topicId])
+  @@map("support_tickets")
+}
+
+/// Сообщение в тикете - история переписки (текст и/или фото).
+model SupportMessage {
+  id        Int      @id @default(autoincrement())
+  ticketId  Int
+  fromAdmin Boolean
+  text      String?
+  /// file_id фото в Telegram
+  photo     String?
+  createdAt DateTime @default(now())
+
+  ticket SupportTicket @relation(fields: [ticketId], references: [id], onDelete: Cascade)
+
+  @@index([ticketId])
+  @@map("support_messages")
+}
+
 /// «Сообщи, когда <предмет> на <регион> будет дешевле <maxPrice> за штуку».
 model PriceAlert {
   id       String @id @default(uuid())

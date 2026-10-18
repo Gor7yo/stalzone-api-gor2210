@@ -42,6 +42,11 @@ export class AccessService {
       this.logger.warn('ADMIN_CHAT_IDS не задан — админка недоступна');
   }
 
+  /** Telegram id админов — куда слать обращения в поддержку, если группа не настроена. */
+  get adminIds() {
+    return [...this.admins];
+  }
+
   isAdmin(chatId: number | bigint | null | undefined) {
     return chatId != null && this.admins.has(String(chatId));
   }
