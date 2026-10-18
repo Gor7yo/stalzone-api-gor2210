@@ -3,7 +3,12 @@ import { ConfigService } from '@nestjs/config';
 import { PrismaService } from 'src/prisma/prisma.service';
 import { AccessService } from './access.service';
 import { type Button, esc, type Screen, toKeyboard } from './bot-ui';
-import { CATEGORIES, type Category, MAX_OPEN } from './support-categories';
+import {
+  CATEGORIES,
+  type Category,
+  MAX_OPEN,
+  MAX_PER_DAY,
+} from './support-categories';
 import { TelegramBotService, TgMessage } from './telegram-bot.service';
 
 /** Сообщений в поддержку в час от одного человека (защита от флуда). */
@@ -111,6 +116,18 @@ export class SupportService {
     if ((await this.openOf(chatId)).length >= MAX_OPEN) {
       throw new SupportLimitError(
         `У вас уже ${MAX_OPEN} открытых обращения. Дождитесь ответа или закройте одно из них.`,
+      );
+    }
+    // новых обращений за сутки (скользящие 24 ч) — закрытые тоже считаются
+    const today = await this.prisma.supportTicket.count({
+      where: {
+        chatId: BigInt(chatId),
+        createdAt: { gte: new Date(Date.now() - 24 * HOUR) },
+      },
+    });
+    if (today >= MAX_PER_DAY) {
+      throw new SupportLimitError(
+        `За сутки можно создать не больше ${MAX_PER_DAY} обращений. Допишите в уже открытое или попробуйте завтра.`,
       );
     }
     this.throttle(chatId);

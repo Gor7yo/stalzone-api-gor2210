@@ -11,3 +11,5 @@ export const isCategory = (s: string | undefined): s is Category =>
 
 /** Открытых обращений у одного человека одновременно. */
 export const MAX_OPEN = 3;
+/** Новых обращений за сутки (скользящие 24 ч) от одного человека. */
+export const MAX_PER_DAY = 5;
