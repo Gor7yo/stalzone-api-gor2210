@@ -4,7 +4,9 @@ import { ITEM_INFO } from 'src/collector/item-info';
 import { TtlCache } from 'src/common/cache/ttl-cache';
 import { PrismaService } from 'src/prisma/prisma.service';
 import { escapeHtml, formatShort, REGION_LABEL } from './format';
-import { parseQuery, searchItems } from './inline-search';
+import { PlayersService, type InlinePlayer } from 'src/players/players.service';
+import { playerResult } from './inline-player';
+import { parseQuery, rawNick, searchItems } from './inline-search';
 import { TelegramBotService } from './telegram-bot.service';
 
 const DAY = 86_400_000;
@@ -32,8 +34,9 @@ export interface InlineQueryUpdate {
 }
 
 /**
- * Inline-режим: в любом чате «@бот комета» → карточка с ценой и кнопкой на сайт.
- * Всё из БД сборщика — квоту EXBO не тратит. Пустой запрос — самые ходовые предметы за сутки.
+ * Inline-режим: в любом чате «@бот комета» → карточка с ценой и кнопкой на сайт,
+ * «@бот ник» → карточка игрока (рейтинг, архетип, K/D) с превью-картинкой профиля.
+ * Цены — из БД сборщика (квоту EXBO не тратят). Пустой запрос — самые ходовые предметы за сутки.
  * Включается в @BotFather: /setinline.
  */
 @Injectable()
@@ -44,6 +47,7 @@ export class InlineService {
   constructor(
     private readonly prisma: PrismaService,
     private readonly bot: TelegramBotService,
+    private readonly players: PlayersService,
   ) {}
 
   async answer(q: InlineQueryUpdate) {
@@ -53,8 +57,28 @@ export class InlineService {
       CACHE_MS,
       async () => {
         const ids = text ? searchItems(text) : await this.popular(region);
-        const stats = await this.stats(region, ids);
-        return ids.map((id) => this.result(region, stats.get(id) ?? empty(id)));
+        // одно слово — может быть ник; регистр берём как набрали (parseQuery его теряет)
+        const playersP: Promise<InlinePlayer[]> =
+          !text || /\s/.test(text)
+            ? Promise.resolve([])
+            : this.players
+                .inlinePlayers(region, rawNick(q.query))
+                .catch(() => []);
+        const [stats, players] = await Promise.all([
+          this.stats(region, ids),
+          playersP,
+        ]);
+        const items = ids.map((id) =>
+          this.result(region, stats.get(id) ?? empty(id)),
+        );
+        const cards = players.map((p) =>
+          playerResult(p, region, this.bot.siteUrl, this.bot.username),
+        );
+        // точный ник — первым, иначе предметы выше игроков
+        const exact = players.some(
+          (p) => p.username.toLowerCase() === text.toLowerCase(),
+        );
+        return exact ? [...cards, ...items] : [...items, ...cards];
       },
     );
     await this.bot

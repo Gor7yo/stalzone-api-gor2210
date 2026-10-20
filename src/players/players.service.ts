@@ -68,6 +68,12 @@ const SEED_TARGET = 3000;
 const SEED_BATCH = 30;
 const SEED_OFFSET_KEY = 'players-seed:offset';
 
+/** Ник как в EXBO: буквы, цифры, _ . - (как CharacterQueryDto). */
+const NICK_RE = /^[\p{L}\p{N}_.-]{1,32}$/u;
+/** Игроков в inline-результатах из нашей базы; точный ник из EXBO помним 10 минут. */
+const INLINE_PLAYERS = 3;
+const EXACT_TTL_MS = 10 * MIN;
+
 /** jsonb-объект → только числовые значения. */
 const numericObject = (o: Record<string, unknown> | null) =>
   Object.fromEntries(
@@ -75,6 +81,9 @@ const numericObject = (o: Record<string, unknown> | null) =>
       .map(([k, v]) => [k, Number(v)] as const)
       .filter(([, v]) => Number.isFinite(v)),
   );
+
+/** Игрок в inline-поиске бота: рейтинг (если посчитан) и базовые цифры. */
+export type InlinePlayer = Awaited<ReturnType<PlayersService['rating']>>;
 
 /** Профиль EXBO — нужные нам поля. */
 interface Profile {
@@ -95,6 +104,7 @@ export class PlayersService implements OnApplicationBootstrap, OnModuleDestroy {
     Progress & { username: string }
   >(1000);
   private readonly populationCache = new TtlCache<Population>(2);
+  private readonly exactCache = new TtlCache<InlinePlayer | null>(2000);
   private readonly enabled: boolean;
   private timer?: NodeJS.Timeout;
   private running = false;
@@ -223,11 +233,27 @@ export class PlayersService implements OnApplicationBootstrap, OnModuleDestroy {
       MIN,
     );
     void this.viewed(region, profile);
-    const metrics = metricsOf(numericStats(profile.stats));
+    return this.ratingOf(
+      profile.username ?? username,
+      numericStats(profile.stats),
+    );
+  }
+
+  /** Рейтинг по числовым статам (из профиля или из снимка). */
+  private async ratingOf(username: string, stats: Record<string, number>) {
+    const metrics = metricsOf(stats);
     const pop = await this.population();
+    const kills = stats.kil ?? 0;
+    const deaths = stats.dea ?? 0;
+    // базовые цифры — для любого статуса (inline-карточка новичка тоже не пустая)
     const base = {
-      username: profile.username ?? username,
+      username,
       population: pop.size,
+      basic: {
+        kd: deaths ? kills / deaths : kills,
+        kills,
+        hours: (stats['pla-tim'] ?? 0) / HOUR,
+      },
     };
     if (!metrics) return { ...base, status: 'newbie' as const };
     if (pop.size < MIN_POPULATION)
@@ -238,6 +264,44 @@ export class PlayersService implements OnApplicationBootstrap, OnModuleDestroy {
       metrics,
       ...rate(metrics, pop),
     };
+  }
+
+  /**
+   * Игроки для inline-поиска в боте («@бот ник»). Сначала — по нашей базе (кого уже открывали,
+   * ник с начала, без квоты EXBO). В EXBO идём только за точным ником от 4 символов, если в базе
+   * его нет; «не найден» помним 10 минут — inline-запросы летят на каждую букву.
+   */
+  async inlinePlayers(region: string, text: string) {
+    const key = usernameKey(text);
+    if (!NICK_RE.test(text) || key.length < 3) return [];
+    const tracked = await this.prisma.trackedCharacter.findMany({
+      where: { region, usernameKey: { startsWith: key } },
+      orderBy: { lastViewedAt: 'desc' },
+      take: INLINE_PLAYERS,
+    });
+    const found = await Promise.all(
+      tracked.map(async (t) => {
+        const last = await this.prisma.characterSnapshot.findFirst({
+          where: { region, uuid: t.uuid },
+          orderBy: { day: 'desc' },
+          select: { stats: true },
+        });
+        return last
+          ? this.ratingOf(t.username, last.stats as Record<string, number>)
+          : null;
+      }),
+    );
+    const list = found.filter((x) => x !== null);
+    if (key.length >= 4 && !tracked.some((t) => t.usernameKey === key)) {
+      // и «не найден», и найденный — 10 минут: повторный набор того же ника EXBO не дёргает
+      const exact = await this.exactCache
+        .getOrLoad(`${region}:${key}`, EXACT_TTL_MS, () =>
+          this.rating(region, text).catch(() => null),
+        )
+        .catch(() => null);
+      if (exact) list.unshift(exact);
+    }
+    return list;
   }
 
   // ---------- итоги месяца ----------

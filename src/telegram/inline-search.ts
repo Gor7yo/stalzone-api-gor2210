@@ -28,6 +28,17 @@ export function parseQuery(raw: string): InlineQuery {
   return { region: 'ru', text: words.join(' ') };
 }
 
+/** Ник из запроса как набрали (с регистром): «eu Bandit_Ivan» → «Bandit_Ivan». */
+export function rawNick(raw: string) {
+  const words = raw.trim().split(/\s+/).filter(Boolean);
+  const first = words[0]?.toLowerCase();
+  return (
+    first && (REGIONS as readonly string[]).includes(first)
+      ? words.slice(1)
+      : words
+  ).join(' ');
+}
+
 /**
  * Поиск предметов по названию (рус/англ, «ё» = «е», неправильная раскладка).
  * Сначала — совпадение с начала названия, потом — по слову, потом — где-то внутри; короткие названия выше.

@@ -5,6 +5,8 @@ import { card, describe as line } from './inline.service';
 import { parseQuery, searchItems } from './inline-search';
 
 jest.mock('src/prisma/prisma.service', () => ({ PrismaService: class {} }));
+// inline.service тянет сервис игроков, а он — сгенерированный клиент Prisma
+jest.mock('generated/prisma/client', () => ({ Prisma: {} }), { virtual: true });
 
 const nameOf = (id: string) => ITEM_INFO[id][0];
 
