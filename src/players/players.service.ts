@@ -514,6 +514,51 @@ export class PlayersService implements OnApplicationBootstrap, OnModuleDestroy {
     }
   }
 
+  /**
+   * Сколько часов наиграно на всех персонажах аккаунта (для бонуса рефералки).
+   * fresh — профили из EXBO (тратит квоту), иначе — последние снимки (персонажей
+   * аккаунтов с Telegram обход обновляет раз в сутки). Персонаж без данных — 0 часов.
+   */
+  async accountHours(userId: string, fresh: boolean) {
+    const user = await this.prisma.user.findUnique({
+      where: { id: userId },
+      select: { characters: true },
+    });
+    const list = (Array.isArray(user?.characters) ? user.characters : []) as {
+      region?: string;
+      name?: string;
+      id?: string | null;
+    }[];
+    let total = 0;
+    for (const c of list) {
+      if (!c?.region || !c.name) continue;
+      let played = 0;
+      if (fresh) {
+        const profile = await this.stalcraft
+          .get<Profile>(
+            [c.region, 'character', 'by-name', c.name, 'profile'],
+            {},
+            MIN,
+          )
+          .catch(() => null);
+        if (profile) void this.viewed(c.region, profile);
+        played = numericStats(profile?.stats)['pla-tim'] ?? 0;
+      } else if (c.id) {
+        const snap = await this.prisma.characterSnapshot.findFirst({
+          where: { region: c.region, uuid: c.id },
+          orderBy: { day: 'desc' },
+          select: { stats: true },
+        });
+        played =
+          numericObject(snap?.stats as Record<string, unknown> | null)[
+            'pla-tim'
+          ] ?? 0;
+      }
+      total += played;
+    }
+    return total / HOUR;
+  }
+
   private touch(region: string, uuid: string) {
     return this.prisma.trackedCharacter.update({
       where: { region_uuid: { region, uuid } },

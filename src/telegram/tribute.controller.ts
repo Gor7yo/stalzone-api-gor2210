@@ -12,6 +12,8 @@ import { ConfigService } from '@nestjs/config';
 import type { Request } from 'express';
 import { Prisma } from 'generated/prisma/client';
 import { PrismaService } from 'src/prisma/prisma.service';
+import { escapeHtml } from './format';
+import { MonitorService } from './monitor.service';
 import { ProService } from './pro.service';
 import { TelegramBotService } from './telegram-bot.service';
 import {
@@ -20,7 +22,17 @@ import {
   type TributeWebhook,
 } from './tribute';
 
-/** Оплата Pro через Tribute: вебхук покупки/подписки → продление Pro. */
+/** События, за которыми стоят деньги: пропуск такого — тревога админам. */
+const PAYMENT_EVENTS = new Set([
+  'new_digital_product',
+  'new_subscription',
+  'renewed_subscription',
+]);
+
+/**
+ * Оплата Pro через Tribute: вебхук покупки/подписки → продление Pro.
+ * Неверная подпись, незнакомый формат, пропущенная оплата или ошибка — тревога в мониторинг.
+ */
 @Controller('api/payments/tribute')
 export class TributeController {
   private readonly logger = new Logger(TributeController.name);
@@ -30,6 +42,7 @@ export class TributeController {
     private readonly prisma: PrismaService,
     private readonly pro: ProService,
     private readonly bot: TelegramBotService,
+    private readonly monitor: MonitorService,
   ) {}
 
   @Post()
@@ -44,10 +57,26 @@ export class TributeController {
       !verifyTributeSignature(req.rawBody, signature, apiKey)
     ) {
       this.logger.warn('Вебхук Tribute с неверной подписью');
+      void this.monitor.alert(
+        'tribute:signature',
+        `<b>Tribute: вебхук с неверной подписью</b>\nЕсли это настоящая оплата - Pro не выдан. Проверьте TRIBUTE_API_KEY в .env (ключ в кабинете Tribute мог смениться).`,
+      );
       throw new UnauthorizedException('bad signature');
     }
 
-    const hook = JSON.parse(req.rawBody.toString('utf8')) as TributeWebhook & {
+    try {
+      return await this.handle(req.rawBody);
+    } catch (e) {
+      void this.monitor.alert(
+        'tribute:error',
+        `<b>Tribute: ошибка при обработке оплаты</b>\n${escapeHtml((e as Error).message).slice(0, 500)}\nTribute повторит вебхук; если не пройдёт - выдайте Pro вручную.`,
+      );
+      throw e;
+    }
+  }
+
+  private async handle(rawBody: Buffer) {
+    const hook = JSON.parse(rawBody.toString('utf8')) as TributeWebhook & {
       test_event?: unknown;
     };
     // кнопка «тестовый вебхук» в Tribute: {"test_event":"test_event"}
@@ -63,10 +92,20 @@ export class TributeController {
     if (action.kind === 'ignore') {
       this.logger.log(`Tribute ${hook.name}: пропуск (${action.reason})`);
       // незнакомый формат — пишем тело (подпись уже проверена, ключей API в нём нет)
-      if (!hook.name || !hook.payload)
+      if (!hook.name || !hook.payload) {
         this.logger.warn(
-          `Tribute: неизвестный формат: ${req.rawBody.toString('utf8').slice(0, 1500)}`,
+          `Tribute: неизвестный формат: ${rawBody.toString('utf8').slice(0, 1500)}`,
         );
+        void this.monitor.alert(
+          'tribute:format',
+          `<b>Tribute: вебхук незнакомого формата</b>\nПодпись верна, но разобрать не смогли - тело в логе stalzone-api.`,
+        );
+      } else if (PAYMENT_EVENTS.has(hook.name)) {
+        void this.monitor.alert(
+          `tribute:skip:${action.reason}`,
+          `<b>Tribute: оплата пришла, но Pro не выдан</b>\n${escapeHtml(hook.name)}: ${escapeHtml(action.reason)}. Проверьте TRIBUTE_PRODUCT_ID / TRIBUTE_SUBSCRIPTION_ID или выдайте Pro вручную.`,
+        );
+      }
       return { ok: true };
     }
 

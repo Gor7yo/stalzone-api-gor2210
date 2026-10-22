@@ -1,5 +1,11 @@
-import { Injectable, Logger } from '@nestjs/common';
+import {
+  Injectable,
+  Logger,
+  OnApplicationBootstrap,
+  OnModuleDestroy,
+} from '@nestjs/common';
 import { randomBytes } from 'node:crypto';
+import { PlayersService } from 'src/players/players.service';
 import { PrismaService } from 'src/prisma/prisma.service';
 import { escapeHtml } from './format';
 import { ProService, TRIAL_DAYS } from './pro.service';
@@ -9,25 +15,46 @@ import { TelegramBotService } from './telegram-bot.service';
 export const REFERRAL_BONUS_DAYS = 1;
 /** Не больше стольких начислений за 30 дней (дальше друзья всё равно получают пробный). */
 export const REFERRAL_MONTH_LIMIT = 10;
+/** Бонус — только если у друга столько часов в игре (против вторых аккаунтов). */
+export const REFERRAL_MIN_HOURS = 5;
+/** Сколько ждём, что друг наиграет нужные часы. */
+export const REFERRAL_WAIT_DAYS = 30;
 const MONTH_MS = 30 * 86_400_000;
+const HOUR_MS = 3_600_000;
 
 export const REF_CODE_RE = /^[A-Za-z0-9_-]{8}$/;
 
 /**
  * Реферальная программа: t.me/<бот>?start=ref_<код>.
  * Друг открывает бота по ссылке (запоминаем, кто пригласил), входит на сайте через EXBO
- * и привязывает этот Telegram — тогда ему сразу включается пробный Pro, а пригласившему +1 день.
+ * и привязывает этот Telegram — тогда ему сразу включается пробный Pro.
+ * Пригласившему +1 день — когда у друга 5+ часов в игре: сразу или, если пока меньше,
+ * как только наиграет (проверяем раз в час по снимкам статистики, ждём 30 дней).
  * Если друг уже брал пробный (на аккаунте или на этом Telegram) — не получает никто.
  */
 @Injectable()
-export class ReferralService {
+export class ReferralService
+  implements OnApplicationBootstrap, OnModuleDestroy
+{
   private readonly logger = new Logger(ReferralService.name);
+  private timer?: NodeJS.Timeout;
+  private checking = false;
 
   constructor(
     private readonly prisma: PrismaService,
     private readonly pro: ProService,
     private readonly bot: TelegramBotService,
+    private readonly players: PlayersService,
   ) {}
+
+  onApplicationBootstrap() {
+    if (process.env.NODE_ENV === 'test') return;
+    this.timer = setInterval(() => void this.checkPending(), HOUR_MS);
+  }
+
+  onModuleDestroy() {
+    clearInterval(this.timer);
+  }
 
   /** Код ссылки аккаунта — создаётся при первом запросе. */
   async codeOf(userId: string) {
@@ -63,7 +90,7 @@ export class ReferralService {
     const [total, month] = await Promise.all([
       this.prisma.referral.count({ where: { inviterId: userId } }),
       this.prisma.referral.count({
-        where: { inviterId: userId, rewarded: true, createdAt: { gte: since } },
+        where: { inviterId: userId, rewardedAt: { gte: since } },
       }),
     ]);
     return {
@@ -73,6 +100,7 @@ export class ReferralService {
       monthLimit: REFERRAL_MONTH_LIMIT,
       bonusDays: REFERRAL_BONUS_DAYS,
       trialDays: TRIAL_DAYS,
+      minHours: REFERRAL_MIN_HOURS,
     };
   }
 
@@ -141,28 +169,106 @@ export class ReferralService {
     if (!trial) return;
 
     await this.pro.grant(userId, TRIAL_DAYS);
-    const since = new Date(Date.now() - MONTH_MS);
-    const rewardedMonth = await this.prisma.referral.count({
-      where: { inviterId, rewarded: true, createdAt: { gte: since } },
+    const hours = await this.players.accountHours(userId, true).catch(() => 0);
+    const { id } = await this.prisma.referral.create({
+      data: {
+        inviterId,
+        inviteeId: userId,
+        chatId,
+        rewarded: false,
+        pendingUntil: new Date(Date.now() + REFERRAL_WAIT_DAYS * 86_400_000),
+      },
     });
-    const rewarded = rewardedMonth < REFERRAL_MONTH_LIMIT;
-    await this.prisma.referral.create({
-      data: { inviterId, inviteeId: userId, chatId, rewarded },
-    });
-    if (rewarded) await this.pro.grant(inviterId, REFERRAL_BONUS_DAYS);
-    this.logger.log(
-      `реферал: ${inviterId} пригласил ${userId}${rewarded ? '' : ' (лимит за месяц)'}`,
+    const [invitee, inviter] = await this.logins(userId, inviterId);
+    await this.bot.send(
+      chatId,
+      `🎁 <b>Pro включён на ${TRIAL_DAYS} дня</b> - по приглашению ${escapeHtml(inviter?.login ?? 'друга')}. Флиппер, флип-алерты и 20 ценовых алертов уже доступны.`,
     );
-    await this.notify(userId, inviterId, chatId, rewarded);
+    if (hours >= REFERRAL_MIN_HOURS) {
+      await this.reward(id, inviterId, userId, false);
+      return;
+    }
+    this.logger.log(
+      `реферал: ${inviterId} пригласил ${userId} (ждём ${REFERRAL_MIN_HOURS} ч в игре, сейчас ${hours.toFixed(1)})`,
+    );
+    if (inviter?.chatId) {
+      await this.bot.send(
+        inviter.chatId,
+        `🤝 По вашей ссылке пришёл ${escapeHtml(invitee?.login ?? 'друг')}. +${REFERRAL_BONUS_DAYS} день Pro начислим, когда у него будет ${REFERRAL_MIN_HOURS} часов в игре (ждём до ${REFERRAL_WAIT_DAYS} дней).`,
+      );
+    }
   }
 
-  private async notify(
-    inviteeId: string,
+  /**
+   * Раз в час: друзья, у которых было меньше 5 часов, — наиграли ли (по снимкам, без квоты EXBO).
+   * Кто не наиграл за 30 дней — бонуса не будет.
+   */
+  async checkPending() {
+    if (this.checking) return;
+    this.checking = true;
+    try {
+      const now = new Date();
+      await this.prisma.referral.updateMany({
+        where: { pendingUntil: { lte: now } },
+        data: { pendingUntil: null },
+      });
+      const pending = await this.prisma.referral.findMany({
+        where: { pendingUntil: { gt: now } },
+        select: { id: true, inviterId: true, inviteeId: true },
+      });
+      for (const r of pending) {
+        const hours = await this.players.accountHours(r.inviteeId, false);
+        if (hours >= REFERRAL_MIN_HOURS)
+          await this.reward(r.id, r.inviterId, r.inviteeId, true);
+      }
+    } catch (e) {
+      this.logger.warn(`Проверка рефералов: ${(e as Error).message}`);
+    } finally {
+      this.checking = false;
+    }
+  }
+
+  /** Друг наиграл 5 часов: +1 день пригласившему, если не упёрся в лимит за 30 дней. */
+  private async reward(
+    id: string,
     inviterId: string,
-    chatId: bigint,
-    rewarded: boolean,
+    inviteeId: string,
+    later: boolean,
   ) {
-    const [invitee, inviter] = await Promise.all([
+    const now = new Date();
+    const rewardedMonth = await this.prisma.referral.count({
+      where: {
+        inviterId,
+        rewardedAt: { gte: new Date(now.getTime() - MONTH_MS) },
+      },
+    });
+    const rewarded = rewardedMonth < REFERRAL_MONTH_LIMIT;
+    // условный update: параллельная проверка не начислит второй раз
+    const { count } = await this.prisma.referral.updateMany({
+      where: { id, pendingUntil: { not: null } },
+      data: { rewarded, rewardedAt: rewarded ? now : null, pendingUntil: null },
+    });
+    if (!count) return;
+    if (rewarded) await this.pro.grant(inviterId, REFERRAL_BONUS_DAYS);
+    this.logger.log(
+      `реферал: бонус ${inviterId} за ${inviteeId}${rewarded ? '' : ' не начислен (лимит за месяц)'}`,
+    );
+    const [invitee, inviter] = await this.logins(inviteeId, inviterId);
+    if (!inviter?.chatId) return;
+    const who = escapeHtml(invitee?.login ?? 'друг');
+    const intro = later
+      ? `🤝 ${who} наиграл ${REFERRAL_MIN_HOURS} часов`
+      : `🤝 По вашей ссылке пришёл ${who}`;
+    await this.bot.send(
+      inviter.chatId,
+      rewarded
+        ? `${intro} - вам +${REFERRAL_BONUS_DAYS} день Pro!`
+        : `${intro}. Бонус не начислен: за 30 дней уже ${REFERRAL_MONTH_LIMIT} приглашений - это максимум.`,
+    );
+  }
+
+  private logins(inviteeId: string, inviterId: string) {
+    return Promise.all([
       this.prisma.user.findUnique({
         where: { id: inviteeId },
         select: { login: true },
@@ -172,18 +278,6 @@ export class ReferralService {
         select: { login: true, chatId: true },
       }),
     ]);
-    await this.bot.send(
-      chatId,
-      `🎁 <b>Pro включён на ${TRIAL_DAYS} дня</b> - по приглашению ${escapeHtml(inviter?.login ?? 'друга')}. Флиппер, флип-алерты и 20 ценовых алертов уже доступны.`,
-    );
-    if (inviter?.chatId) {
-      await this.bot.send(
-        inviter.chatId,
-        rewarded
-          ? `🤝 По вашей ссылке пришёл ${escapeHtml(invitee?.login ?? 'друг')} - вам +${REFERRAL_BONUS_DAYS} день Pro!`
-          : `🤝 По вашей ссылке пришёл ${escapeHtml(invitee?.login ?? 'друг')}. Бонус не начислен: за 30 дней уже ${REFERRAL_MONTH_LIMIT} приглашений - это максимум.`,
-      );
-    }
   }
 }
 

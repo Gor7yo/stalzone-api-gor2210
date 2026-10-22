@@ -20,6 +20,8 @@ export const EXBO_FAILURES = 20;
 const EXBO_WINDOW_MS = 5 * MIN;
 /** Утренняя сводка — в 9:00 по Москве (UTC+3). */
 const SUMMARY_HOUR_UTC = 6;
+/** Одна и та же разовая тревога (alert) — не чаще раза в 30 минут. */
+export const ALERT_REPEAT_MS = 30 * MIN;
 
 export interface CheckResult {
   /** null — всё в порядке */
@@ -39,6 +41,8 @@ export class MonitorService implements OnApplicationBootstrap, OnModuleDestroy {
   private timer?: NodeJS.Timeout;
   /** текущие проблемы: проверка → с какого момента */
   private readonly down = new Map<string, number>();
+  /** разовые тревоги: ключ → когда отправили и сколько таких пропустили с тех пор */
+  private readonly alerted = new Map<string, { at: number; skipped: number }>();
   private lastSummaryDay = '';
 
   constructor(
@@ -176,6 +180,27 @@ export class MonitorService implements OnApplicationBootstrap, OnModuleDestroy {
           ? `⚠️ Сейчас не работает: ${problems.join(', ')}`
           : '✅ Всё работает',
       ].join('\n'),
+    );
+  }
+
+  /**
+   * Разовая тревога от других сервисов (например, вебхук оплаты не прошёл).
+   * Повторы с тем же ключом в течение 30 минут не шлём, а считаем — число придёт со следующей.
+   */
+  async alert(key: string, html: string) {
+    if (!this.enabled || !this.bot.enabled) return;
+    const now = Date.now();
+    const prev = this.alerted.get(key);
+    if (prev && now - prev.at < ALERT_REPEAT_MS) {
+      prev.skipped++;
+      return;
+    }
+    this.alerted.set(key, { at: now, skipped: 0 });
+    const more = prev?.skipped
+      ? `\n\nС прошлого оповещения таких было ещё ${prev.skipped}.`
+      : '';
+    await this.notify(`⚠️ ${html}${more}`).catch((e: Error) =>
+      this.logger.warn(`тревога ${key}: ${e.message}`),
     );
   }
 

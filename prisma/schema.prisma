@@ -265,11 +265,16 @@ model Referral {
   /// Приглашённый аккаунт — засчитывается один раз
   inviteeId String   @unique
   chatId    BigInt
-  /// Пригласившему начислен день Pro (false — упёрся в лимит за 30 дней)
+  /// Пригласившему начислен день Pro (false — ждём часов в игре, упёрся в лимит за 30 дней или не дождались)
   rewarded  Boolean
+  /// Когда начислен бонус — по нему считается лимит за 30 дней
+  rewardedAt   DateTime?
+  /// У друга меньше 5 часов в игре: до этой даты ждём, что наиграет (null — уже решено)
+  pendingUntil DateTime?
   createdAt DateTime @default(now())
 
   @@index([inviterId, createdAt])
+  @@index([pendingUntil])
   @@map("referrals")
 }
 

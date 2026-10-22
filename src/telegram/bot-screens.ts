@@ -178,6 +178,7 @@ export interface ProData {
     monthLimit: number;
     bonusDays: number;
     trialDays: number;
+    minHours: number;
   };
 }
 
@@ -239,7 +240,7 @@ export function proScreen(d: ProData): Screen {
       { type: 'h', text: '🤝 Пригласи друга' },
       {
         type: 'p',
-        text: `Друг получит <b>${r.trialDays} дня Pro</b>, а вы - <b>+${r.bonusDays} день</b> за каждого, кто придёт по ссылке и привяжет Telegram.`,
+        text: `Друг получит <b>${r.trialDays} дня Pro</b>, а вы - <b>+${r.bonusDays} день</b> за каждого, кто придёт по ссылке, привяжет Telegram и наиграет ${r.minHours} часов.`,
       },
       {
         type: 'table',

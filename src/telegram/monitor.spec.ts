@@ -42,8 +42,27 @@ describe('MonitorService: тревога только при смене сост
       { get: () => undefined } as never,
     );
     const tick = () => (monitor as unknown as { tick(): Promise<void> }).tick();
-    return { sent, tick, setFailures: (n: number) => (failures = n) };
+    // в jest NODE_ENV=test — мониторинг выключен; разовые тревоги проверяем как на проде
+    (monitor as unknown as { enabled: boolean }).enabled = true;
+    return { sent, tick, monitor, setFailures: (n: number) => (failures = n) };
   }
+
+  it('разовая тревога: повтор за 30 минут не шлём, а считаем', async () => {
+    jest.useFakeTimers({ now: new Date('2026-10-22T03:00:00Z') });
+    try {
+      const { sent, monitor } = setup();
+      await monitor.alert('tribute:signature', 'плохая подпись');
+      await monitor.alert('tribute:signature', 'плохая подпись');
+      await monitor.alert('tribute:signature', 'плохая подпись');
+      await monitor.alert('tribute:format', 'формат');
+      expect(sent).toEqual(['⚠️ плохая подпись', '⚠️ формат']);
+      jest.setSystemTime(new Date('2026-10-22T03:31:00Z'));
+      await monitor.alert('tribute:signature', 'плохая подпись');
+      expect(sent[2]).toContain('ещё 2');
+    } finally {
+      jest.useRealTimers();
+    }
+  });
 
   it('EXBO: одна тревога за весь сбой и одно «снова работает»', async () => {
     const { sent, tick, setFailures } = setup();
