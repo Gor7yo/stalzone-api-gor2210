@@ -71,7 +71,8 @@ export class StalcraftApiClient {
 
   /**
    * segments — части пути без слешей, например ['ru', 'auction', 'gyn0', 'lots'].
-   * priority: 'user' — запрос пользователя (ждёт квоту), 'background' — сборщик (берёт только остаток).
+   * priority: 'user' — запрос пользователя (ждёт квоту), 'background' — сборщик (берёт только остаток),
+   * 'scan' — обход справочника (половина резерва людей, см. TokenBudget).
    * Ответ из кеша квоту не тратит.
    */
   get<T>(
@@ -135,7 +136,7 @@ export class StalcraftApiClient {
       await this.budget.take(this.cost(path), priority);
     } catch {
       // квоты нет: пользователю — понятная 429, сборщику — пропуск хода
-      if (priority === 'background') throw new BudgetExhaustedError();
+      if (priority !== 'user') throw new BudgetExhaustedError();
       throw this.toHttpException(429);
     }
     try {
@@ -161,7 +162,7 @@ export class StalcraftApiClient {
         );
         this.logger.warn(`STALCRAFT API 429 ← /${path} (квота кончилась)`);
         // сборщик просто пропустит ход; пользовательский запрос подождёт квоту один раз
-        if (priority === 'background') throw new BudgetExhaustedError();
+        if (priority !== 'user') throw new BudgetExhaustedError();
         if (attempt === 0) return this.request<T>(path, params, priority, 1);
       }
 

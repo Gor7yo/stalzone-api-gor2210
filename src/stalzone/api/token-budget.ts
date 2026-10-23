@@ -7,7 +7,12 @@ export class BudgetExhaustedError extends Error {
   }
 }
 
-export type Priority = 'user' | 'background';
+/**
+ * scan — медленный обход справочника (MarketActivityService): сборщик держит кошелёк ровно
+ * на резерве, и остатка обходу не достаётся никогда. Поэтому scan может брать из резерва людей,
+ * но только верхнюю половину, и тоже не ждёт.
+ */
+export type Priority = 'user' | 'background' | 'scan';
 
 /**
  * Общий для всего приложения «кошелёк» токенов STALCRAFT API (token bucket).
@@ -23,7 +28,7 @@ export class TokenBudget {
   private updatedAt = Date.now();
   private blockedUntil = 0;
   /** расход по типам за текущую минуту — для статуса сборщика */
-  private spent = { user: 0, background: 0, since: Date.now() };
+  private spent = { user: 0, background: 0, scan: 0, since: Date.now() };
 
   constructor(
     public perMinute: number,
@@ -54,7 +59,7 @@ export class TokenBudget {
     );
     this.updatedAt = now;
     if (now - this.spent.since >= 60_000) {
-      this.spent = { user: 0, background: 0, since: now };
+      this.spent = { user: 0, background: 0, scan: 0, since: now };
     }
   }
 
@@ -64,13 +69,18 @@ export class TokenBudget {
     for (;;) {
       this.refill();
       const blocked = Date.now() < this.blockedUntil;
-      const floor = priority === 'background' ? this.reserve : 0;
+      const floor =
+        priority === 'background'
+          ? this.reserve
+          : priority === 'scan'
+            ? this.reserve / 2
+            : 0;
       if (!blocked && this.tokens - cost >= floor) {
         this.tokens -= cost;
         this.spent[priority] += cost;
         return;
       }
-      if (priority === 'background') throw new BudgetExhaustedError();
+      if (priority !== 'user') throw new BudgetExhaustedError();
       // сколько ждать до нужного количества токенов
       const need = Math.max(0, cost - this.tokens);
       const wait = blocked
@@ -117,6 +127,7 @@ export class TokenBudget {
       spentThisMinute: {
         user: this.spent.user,
         background: this.spent.background,
+        scan: this.spent.scan,
       },
     };
   }

@@ -23,7 +23,7 @@ const DAY = 24 * 60 * MIN;
 export const ACTIVE_DAYS = 30;
 /** Каждый предмет перепроверяем раз в сутки (новые предметы и ушедшие с аукциона). */
 const RECHECK_MS = DAY;
-/** Ход - раз в минуту, за ход не больше стольких предметов; квота - только остаток (background). */
+/** Ход - раз в минуту, за ход не больше стольких предметов (квота - приоритет scan). */
 const TICK_MS = MIN;
 const BATCH = 30;
 const FIRST_TICK_MS = 2 * MIN;
@@ -52,7 +52,7 @@ const CANDIDATES = Object.entries(ITEM_INFO)
  * Какие предметы реально есть на аукционе: раз в сутки по всему справочнику спрашиваем EXBO
  * последнюю продажу (и, если её месяц не было, число лотов). Сборщик держит в БД только
  * нужные людям предметы - этот обход нужен, чтобы рынок на сайте не показывал «мусор»,
- * которого не бывает на аукционе. Квота - только остаток после сборщика и людей.
+ * которого не бывает на аукционе. Квота - приоритет scan (половина резерва людей, см. TokenBudget).
  */
 @Injectable()
 export class MarketActivityService
@@ -182,7 +182,7 @@ export class MarketActivityService
         [region, 'auction', itemId, 'history'],
         { limit: 1, offset: 0 },
         0,
-        'background',
+        'scan',
       );
       const time = history.prices?.[0]?.time;
       lastSaleAt = time ? new Date(time) : null;
@@ -192,7 +192,7 @@ export class MarketActivityService
           [region, 'auction', itemId, 'lots'],
           { limit: 1, offset: 0 },
           0,
-          'background',
+          'scan',
         );
         lotsTotal = lots.total ?? 0;
       }
