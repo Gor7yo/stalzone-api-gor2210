@@ -77,6 +77,12 @@ class GrantProDto extends TermDto {
   @IsOptional()
   @IsBoolean()
   notify?: boolean;
+
+  /** Своё послание в бот вместо стандартного «Флиппер, графики… уже открыты» */
+  @IsOptional()
+  @IsString()
+  @MaxLength(1000)
+  message?: string;
 }
 
 class BanDto extends TermDto {

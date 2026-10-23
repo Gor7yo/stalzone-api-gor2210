@@ -7,6 +7,7 @@ import { CollectorService } from 'src/collector/collector.service';
 import { PrismaService } from 'src/prisma/prisma.service';
 import { AccessService, FOREVER_MS, isBanned } from './access.service';
 import { AccountService } from './account.service';
+import { escapeHtml } from './format';
 import { isProActive, ProService } from './pro.service';
 import { TelegramBotService } from './telegram-bot.service';
 
@@ -295,11 +296,14 @@ export class AdminService {
     }));
   }
 
-  /** Выдать Pro: +дни к текущему сроку, до даты или навсегда. */
+  /**
+   * Выдать Pro: +дни к текущему сроку, до даты или навсегда.
+   * message — своё послание в бот (под строкой о сроке) вместо стандартного текста.
+   */
   async grantPro(
     adminId: bigint,
     id: string,
-    term: Term & { notify?: boolean },
+    term: Term & { notify?: boolean; message?: string },
   ) {
     const u = await this.target(id);
     const until =
@@ -307,10 +311,14 @@ export class AdminService {
         ? await this.pro.grant(id, term.days)
         : await this.pro.setUntil(id, untilOf(term));
     await this.logAction(adminId, id, 'pro_grant', fmt(until));
+    const message = term.message?.trim();
     if (term.notify !== false && u.chatId)
       await this.bot.send(
         u.chatId,
-        `⭐ <b>Вам выдан STALZONE INFO Pro</b> ${fmt(until)}.\nФлиппер, графики и флип-алерты уже открыты.`,
+        `⭐ <b>Вам выдан STALZONE INFO Pro</b> ${fmt(until)}.\n` +
+          (message
+            ? `\n${escapeHtml(message)}`
+            : 'Флиппер, графики и флип-алерты уже открыты.'),
       );
     return this.user(id);
   }
