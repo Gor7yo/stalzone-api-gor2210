@@ -471,6 +471,20 @@ model AuctionLot {
   @@map("auction_lots")
 }
 
+/// Торгуется ли предмет вообще: последняя продажа и лоты сейчас (MarketActivityService, раз в сутки по всему справочнику).
+/// По ней рынок на сайте скрывает предметы, которых месяц не было на аукционе.
+model MarketItemActivity {
+  region     String
+  itemId     String
+  lastSaleAt DateTime?
+  lotsTotal  Int       @default(0)
+  checkedAt  DateTime
+
+  @@id([region, itemId])
+  @@index([checkedAt])
+  @@map("market_item_activity")
+}
+
 /// Предмет, который сборщик держит свежим. Частота зависит от ликвидности и интереса пользователей.
 model TrackedItem {
   region String

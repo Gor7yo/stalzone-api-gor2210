@@ -1,7 +1,6 @@
 jest.mock('src/prisma/prisma.service', () => ({ PrismaService: class {} }), {
   virtual: true,
 });
-jest.mock('generated/prisma/client', () => ({ Prisma: {} }), { virtual: true });
 
 import { previousMonth, recapCaption } from './recap.service';
 

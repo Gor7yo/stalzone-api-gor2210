@@ -1,5 +1,6 @@
 import { Controller, Get, Header, Query } from '@nestjs/common';
 import { SkipThrottle } from '@nestjs/throttler';
+import { MarketActivityService } from 'src/collector/market-activity.service';
 import { StalcraftApiClient } from 'src/stalzone/api/stalcraft-api.client';
 import { ApiService } from './api.service';
 import {
@@ -24,7 +25,18 @@ export class ApiController {
     private readonly stalcraft: StalcraftApiClient,
     private readonly historyPeriod: HistoryPeriodService,
     private readonly market: MarketService,
+    private readonly activity: MarketActivityService,
   ) {}
+
+  /**
+   * Предметы, которые за 30 дней были на аукционе (RU и EU вместе) - рынок на сайте показывает только их.
+   * ready=false - справочник ещё не обойдён, фильтровать рано.
+   */
+  @Get('market/active')
+  @Header('Cache-Control', 'public, max-age=600')
+  getActiveItems() {
+    return this.activity.active();
+  }
 
   /** Радар рынка: подорожало / подешевело / больше всего сделок за сутки (из БД сборщика). */
   @Get('market/radar')

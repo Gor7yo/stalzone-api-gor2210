@@ -3,6 +3,7 @@ import { ServerGuard } from 'src/common/guards/server.guard';
 import { StalzoneModule } from 'src/stalzone/stalzone.module';
 import { AuctionStore } from './auction-store.service';
 import { CollectorService } from './collector.service';
+import { MarketActivityService } from './market-activity.service';
 
 @Controller('api/collector')
 class CollectorController {
@@ -21,7 +22,7 @@ class CollectorController {
 @Module({
   imports: [StalzoneModule],
   controllers: [CollectorController],
-  providers: [CollectorService, AuctionStore],
-  exports: [CollectorService, AuctionStore],
+  providers: [CollectorService, AuctionStore, MarketActivityService],
+  exports: [CollectorService, AuctionStore, MarketActivityService],
 })
 export class CollectorModule {}

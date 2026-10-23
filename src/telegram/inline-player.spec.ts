@@ -4,7 +4,6 @@ import 'reflect-metadata';
 jest.mock('src/prisma/prisma.service', () => ({ PrismaService: class {} }), {
   virtual: true,
 });
-jest.mock('generated/prisma/client', () => ({ Prisma: {} }), { virtual: true });
 
 import type { InlinePlayer } from 'src/players/players.service';
 import {

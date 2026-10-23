@@ -1,12 +1,6 @@
 import { summarize } from './sale-timing.service';
 
 jest.mock('src/prisma/prisma.service', () => ({ PrismaService: class {} }));
-// сгенерированный клиент Prisma (generated/) в юнит-тесте не нужен — только Prisma.sql для SQL-кусков
-jest.mock(
-  'generated/prisma/client',
-  () => ({ Prisma: { sql: () => ({}), raw: () => ({}) } }),
-  { virtual: true },
-);
 
 type Row = Parameters<typeof summarize>[0][number];
 
