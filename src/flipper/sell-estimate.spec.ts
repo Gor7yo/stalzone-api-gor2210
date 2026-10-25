@@ -1,5 +1,7 @@
 import {
   demandShare,
+  flipBatch,
+  flipTiming,
   hoursToSell,
   priceForHours,
   undercut,
@@ -20,6 +22,69 @@ const market = (ladder: [number, number][]): SellMarket => ({
   ladder: ladder.map(([unit, amount]) => ({ unit, amount })),
   ratePerHour: 10,
   sales,
+});
+
+describe('flipTiming', () => {
+  it('время продажи по медиане и прибыль в час', () => {
+    // по медиане согласна половина: 10 × 0,7 × 0,5 = 3,5 шт/ч; впереди 5 шт + свои 2 → 2 ч
+    const t = flipTiming(
+      market([
+        [90_000, 2],
+        [95_000, 3],
+        [120_000, 4],
+      ]),
+      2,
+      300_000,
+    );
+    expect(t).toEqual({ hours: 2, perHour: 150_000 });
+  });
+
+  it('очень быстрая продажа — в час считаем минимум за полчаса', () => {
+    expect(flipTiming(market([]), 1, 100_000).perHour).toBe(200_000);
+  });
+
+  it('сделок нет — не продастся, в час не считаем', () => {
+    expect(flipTiming({ ...market([]), ratePerHour: 0 }, 1, 100_000)).toEqual({
+      hours: null,
+      perHour: null,
+    });
+  });
+});
+
+describe('flipBatch', () => {
+  // по медиане 3,5 шт/ч → за сутки 84 шт
+  const lot = (amount: number, unit: number) => ({
+    amount,
+    buyout: amount * unit,
+    profit: amount * (95_000 - unit),
+  });
+
+  it('скупить все, если всё уходит за сутки', () => {
+    const b = flipBatch(market([]), [lot(2, 60_000), lot(1, 50_000)]);
+    expect(b).toMatchObject({
+      lots: 2,
+      total: 2,
+      buyout: 170_000,
+      profit: 115_000,
+    });
+    expect(b?.sellHours).toBeCloseTo(0.9, 1);
+  });
+
+  it('берёт дешёвые, пока влезает в сутки, остальное не советует', () => {
+    // 40 + 40 штук влезают (80 из 84), третий лот на 40 — уже нет
+    const b = flipBatch(market([]), [
+      lot(40, 70_000),
+      lot(40, 60_000),
+      lot(40, 50_000),
+    ]);
+    expect(b).toMatchObject({ lots: 2, total: 3, buyout: 4_400_000 });
+  });
+
+  it('меньше двух лотов не набирается — пакета нет', () => {
+    expect(
+      flipBatch(market([]), [lot(80, 50_000), lot(10, 60_000)]),
+    ).toBeNull();
+  });
 });
 
 describe('sell-estimate', () => {

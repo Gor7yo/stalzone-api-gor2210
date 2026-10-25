@@ -427,6 +427,11 @@ export class BotCommandsService implements OnModuleInit {
         await this.go(chatId, 'alerts', edit);
         return answer(text);
       }
+      case 'rdel': {
+        if (!(REGIONS as readonly string[]).includes(arg)) return answer();
+        await this.alerts.setRadar(q.from, arg as Region, false);
+        return answer('Радар рынка отключён');
+      }
       case 'del': {
         const text = await this.alerts
           .deletePrice(chatId, arg)

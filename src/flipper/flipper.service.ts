@@ -11,6 +11,12 @@ import {
   type Confidence,
   type Flip,
 } from './flip-filter';
+import {
+  flipBatch,
+  flipTiming,
+  type LadderStep,
+  type SellMarket,
+} from './sell-estimate';
 
 const MIN = 60_000;
 const DAY = 24 * 60 * MIN;
@@ -40,9 +46,13 @@ interface PriceRow {
   quality: number;
   bucket: number;
   n: number;
+  /** продано штук за окно — скорость рынка для времени продажи */
+  units: number;
   median: number;
+  p10: number;
   p25: number;
   p75: number;
+  p90: number;
   last: Date;
 }
 
@@ -68,6 +78,23 @@ function confidenceOf(p: PriceRow, basis: Flip['basis']): Confidence {
   if (p.n >= 7 && spread <= 2.5) return 'medium';
   return 'low';
 }
+
+/** Рынок позиции для оценки времени продажи: очередь без купленных лотов и скорость сделок за окно. */
+const marketOf = (
+  p: PriceRow,
+  ladder: (LadderStep & { lot: LotRow })[] = [],
+  bought: LotRow[],
+): SellMarket => ({
+  ladder: ladder.filter((s) => !bought.includes(s.lot)),
+  ratePerHour: p.units / (WINDOW_DAYS * 24),
+  sales: {
+    p10: p.p10,
+    p25: p.p25,
+    median: p.median,
+    p75: p.p75,
+    p90: p.p90,
+  },
+});
 
 const iso = (d: Date) => new Date(d).toISOString().replace(/\.\d{3}Z$/, 'Z');
 
@@ -100,6 +127,7 @@ export class FlipperService {
         SELECT "itemId", "variant", "quality", "upgrade", "time",
                CASE WHEN "upgrade" <= 0 THEN 0 WHEN "upgrade" <= 4 THEN 1
                     WHEN "upgrade" <= 9 THEN 2 WHEN "upgrade" <= 14 THEN 3 ELSE 4 END AS tier,
+               GREATEST("amount", 1) AS amount,
                "price"::float8 / GREATEST("amount", 1) AS unit
         FROM "auction_sales"
         WHERE "region" = ${region} AND "time" >= ${since} AND "price" > 0
@@ -107,9 +135,12 @@ export class FlipperService {
       SELECT "itemId", "variant", "quality",
              CASE WHEN GROUPING("upgrade") = 0 THEN "upgrade" ELSE 100 + tier END AS bucket,
              count(*)::int AS n,
+             sum(amount)::float8 AS units,
              percentile_cont(0.5) WITHIN GROUP (ORDER BY unit) AS median,
+             percentile_cont(0.1) WITHIN GROUP (ORDER BY unit) AS p10,
              percentile_cont(0.25) WITHIN GROUP (ORDER BY unit) AS p25,
              percentile_cont(0.75) WITHIN GROUP (ORDER BY unit) AS p75,
+             percentile_cont(0.9) WITHIN GROUP (ORDER BY unit) AS p90,
              max("time") AS last
       FROM s
       GROUP BY GROUPING SETS (
@@ -141,11 +172,34 @@ export class FlipperService {
         AND l."lastSeenAt" >= t."lastLotsAt" AND t."lastLotsAt" >= ${freshSince}
         AND l."endTime" > ${now}`;
 
-    const flips: Flip[] = [];
+    // очереди конкурентов для времени продажи: по точной заточке и по ступени (как цена)
+    const ladders = new Map<string, (LadderStep & { lot: LotRow })[]>();
+    const addTo = (key: string, lot: LotRow) => {
+      const amount = Math.max(1, lot.amount);
+      const step = { unit: Number(lot.buyoutPrice) / amount, amount, lot };
+      const list = ladders.get(key);
+      if (list) list.push(step);
+      else ladders.set(key, [step]);
+    };
     for (const lot of lots) {
       const base = `${lot.itemId}|${lot.variant}|${lot.quality}`;
-      const exact = byKey.get(`${base}|${lot.upgrade}`);
-      const tier = byKey.get(`${base}|${100 + tierOf(lot.upgrade)}`);
+      addTo(`${base}|${lot.upgrade}`, lot);
+      addTo(`${base}|${100 + tierOf(lot.upgrade)}`, lot);
+    }
+    for (const list of ladders.values()) list.sort((a, b) => a.unit - b.unit);
+
+    const flips: Flip[] = [];
+    // флипы одной позиции (предмет, вариант, качество, заточка) — для пакетного флипа
+    const positions = new Map<
+      string,
+      { p: PriceRow; ladderKey: string; items: { flip: Flip; lot: LotRow }[] }
+    >();
+    for (const lot of lots) {
+      const base = `${lot.itemId}|${lot.variant}|${lot.quality}`;
+      const exactKey = `${base}|${lot.upgrade}`;
+      const tierKey = `${base}|${100 + tierOf(lot.upgrade)}`;
+      const exact = byKey.get(exactKey);
+      const tier = byKey.get(tierKey);
       const basis: Flip['basis'] = exact ? 'exact' : 'tier';
       const p = exact ?? tier;
       if (!p) continue;
@@ -156,9 +210,17 @@ export class FlipperService {
       const pct = (profit / buyout) * 100;
       if (profit < MIN_PROFIT || pct < MIN_PCT) continue;
 
+      // после выкупа этот лот уходит с рынка — в очереди остаются остальные
+      const ladderKey = exact ? exactKey : tierKey;
+      const timing = flipTiming(
+        marketOf(p, ladders.get(ladderKey), [lot]),
+        amount,
+        profit,
+      );
+
       // название и группа — из справочника EXBO по всем предметам (не только стартовый список)
       const info = ITEM_INFO[lot.itemId];
-      flips.push({
+      const flip: Flip = {
         key: `${lot.itemId}|${lot.quality}|${lot.upgrade}|${amount}|${buyout}|${lot.endTime.getTime()}${lot.variant ? `|${lot.variant}` : ''}`,
         itemId: lot.itemId,
         name: info?.[0],
@@ -177,10 +239,30 @@ export class FlipperService {
         deals: p.n,
         perDay: Math.round((p.n / WINDOW_DAYS) * 10) / 10,
         confidence: confidenceOf(p, basis),
+        sellHours: timing.hours,
+        profitPerHour: timing.perHour,
         seenAt: iso(lot.seenAt),
         endTime: iso(lot.endTime),
         lastSale: iso(p.last),
-      });
+      };
+      flips.push(flip);
+      const position = positions.get(exactKey);
+      if (position) position.items.push({ flip, lot });
+      else positions.set(exactKey, { p, ladderKey, items: [{ flip, lot }] });
+    }
+
+    // пакет: несколько выгодных лотов одной позиции — сколько скупить, чтобы всё ушло за сутки
+    for (const { p, ladderKey, items } of positions.values()) {
+      if (items.length < 2) continue;
+      const batch = flipBatch(
+        marketOf(
+          p,
+          ladders.get(ladderKey),
+          items.map((i) => i.lot),
+        ),
+        items.map((i) => i.flip),
+      );
+      if (batch) for (const i of items) i.flip.batch = batch;
     }
     flips.sort((a, b) => b.profit - a.profit);
 

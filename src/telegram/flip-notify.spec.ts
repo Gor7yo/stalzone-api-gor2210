@@ -22,6 +22,8 @@ const flip = (patch: Partial<Flip> = {}): Flip => {
     deals: 24,
     perDay: 3.4,
     confidence: 'high',
+    sellHours: 3,
+    profitPerHour: 258_000,
     seenAt: new Date(NOW - 60_000).toISOString(),
     endTime: '2026-10-12T00:00:00Z',
     lastSale: '2026-10-11T12:00:00Z',
@@ -109,5 +111,24 @@ describe('flipMessage', () => {
     expect(text).toContain('Новые флипы');
     expect(text).toContain('+775к');
     expect(text).toContain('и ещё 2');
+    expect(text).toContain('уйдёт за ~3 ч');
+  });
+
+  it('ушедший лот — зачёркнут с пометкой, остальные как были', () => {
+    const sold = flip({ itemId: 'a' });
+    const alive = flip({ itemId: 'b' });
+    const text = flipMessage(
+      'ru',
+      [
+        { flip: sold, lots: 1 },
+        { flip: alive, lots: 1 },
+      ],
+      new Map([[sold.key, 'sold']]),
+    );
+    expect(text).toContain(
+      '<s><b>Висмут · Редкий +15</b></s> · ⛔ уже выкупили',
+    );
+    // подробная строка «выкуп … → …» осталась только у живого лота
+    expect(text.match(/выкуп /g)).toHaveLength(1);
   });
 });

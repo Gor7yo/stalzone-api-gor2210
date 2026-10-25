@@ -22,6 +22,7 @@ import {
 import { ProService } from './pro.service';
 import { InlineService } from './inline.service';
 import { MonitorService } from './monitor.service';
+import { RadarService } from './radar.service';
 import { RecapService } from './recap.service';
 import { ReferralService } from './referral.service';
 import { SupportService } from './support.service';
@@ -64,6 +65,7 @@ import { WebLinkService } from './web-link.service';
     InlineService,
     MonitorService,
     RecapService,
+    RadarService,
   ],
 })
 export class TelegramModule {}

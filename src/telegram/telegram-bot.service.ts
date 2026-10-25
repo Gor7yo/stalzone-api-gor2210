@@ -237,6 +237,45 @@ export class TelegramBotService
     buttons: InlineButton[][] = [],
     threadId?: number,
   ): Promise<boolean> {
+    return (await this.sendWithId(chatId, html, buttons, threadId)) !== null;
+  }
+
+  /**
+   * Правит текст своего HTML-сообщения (например, «лот уже выкупили»).
+   * Ошибки не бросает: сообщение могли удалить, текст мог не измениться.
+   */
+  async editText(
+    chatId: number | bigint,
+    messageId: number,
+    html: string,
+    buttons: InlineButton[][] = [],
+  ): Promise<boolean> {
+    try {
+      await this.call('editMessageText', {
+        chat_id: Number(chatId),
+        message_id: messageId,
+        text: html,
+        parse_mode: 'HTML',
+        link_preview_options: { is_disabled: true },
+        ...(buttons.length && { reply_markup: { inline_keyboard: buttons } }),
+      });
+      return true;
+    } catch (error) {
+      if (!isNotModified(error))
+        this.logger.warn(
+          `editMessageText → ${Number(chatId)}: ${String(error)}`,
+        );
+      return false;
+    }
+  }
+
+  /** Как send, но возвращает id сообщения (чтобы потом его поправить); null — не доставлено. */
+  async sendWithId(
+    chatId: number | bigint,
+    html: string,
+    buttons: InlineButton[][] = [],
+    threadId?: number,
+  ): Promise<number | null> {
     const body = {
       chat_id: Number(chatId),
       ...(threadId && { message_thread_id: threadId }),
@@ -247,12 +286,12 @@ export class TelegramBotService
     };
     for (let attempt = 0; attempt < 2; attempt++) {
       try {
-        await this.call('sendMessage', body);
-        return true;
+        const msg = await this.call<TgMessage>('sendMessage', body);
+        return msg.message_id;
       } catch (error) {
         if (!(error instanceof TelegramApiError)) {
           this.logger.warn(`sendMessage → ${Number(chatId)}: ${String(error)}`);
-          return false;
+          return null;
         }
         if (error.code === 429 && attempt === 0) {
           await sleep(Math.min((error.retryAfter ?? 1) * 1000, 30_000));
@@ -265,10 +304,10 @@ export class TelegramBotService
             `sendMessage → ${Number(chatId)}: ${error.code} ${error.message}`,
           );
         }
-        return false;
+        return null;
       }
     }
-    return false;
+    return null;
   }
 
   /**

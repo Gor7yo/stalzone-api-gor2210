@@ -116,6 +116,60 @@ export function hoursToSell(
   return hours > MAX_LOT_HOURS ? null : hours;
 }
 
+/** Прибыль в час считаем минимум за полчаса: выставить лот тоже занимает время. */
+export const MIN_FLIP_HOURS = 0.5;
+
+/**
+ * Флип: за сколько часов перепродать купленное по медиане и сколько это прибыли в час.
+ * hours: null — вряд ли продастся за срок жизни лота (тогда и в час не считаем).
+ */
+export function flipTiming(m: SellMarket, amount: number, profit: number) {
+  const hours = hoursToSell(m, m.sales.median, amount);
+  if (hours === null) return { hours: null, perHour: null };
+  return {
+    hours: Math.round(hours * 10) / 10,
+    perHour: Math.round(profit / Math.max(MIN_FLIP_HOURS, hours)),
+  };
+}
+
+/** Пакетный флип — за сколько часов должны уйти все скупленные лоты. */
+export const BATCH_HOURS = 24;
+
+export interface BatchLot {
+  amount: number;
+  buyout: number;
+  profit: number;
+}
+
+/**
+ * Пакетный флип: несколько выгодных лотов одной позиции. Скупаем от дешёвых к дорогим,
+ * пока всё купленное реально продать по медиане за сутки (очередь дешевле + скорость сделок).
+ * m.ladder — лоты позиции без этих флипов. null — меньше двух лотов набирается.
+ */
+export function flipBatch(m: SellMarket, flips: BatchLot[]) {
+  const sorted = [...flips].sort(
+    (a, b) => a.buyout / a.amount - b.buyout / b.amount,
+  );
+  const picked: BatchLot[] = [];
+  let units = 0;
+  for (const f of sorted) {
+    const hours = hoursToSell(m, m.sales.median, units + f.amount);
+    if (hours === null || hours > BATCH_HOURS) break;
+    picked.push(f);
+    units += f.amount;
+  }
+  if (picked.length < 2) return null;
+  const sum = (k: keyof BatchLot) => picked.reduce((s, f) => s + f[k], 0);
+  return {
+    lots: picked.length,
+    total: flips.length,
+    buyout: sum('buyout'),
+    profit: sum('profit'),
+    sellHours:
+      Math.round((hoursToSell(m, m.sales.median, units) ?? 0) * 10) / 10,
+  };
+}
+
 /**
  * Самая высокая цена за штуку, при которой amount штук уйдут примерно за hours часов;
  * null — за этот срок не продать даже дешевле всех.

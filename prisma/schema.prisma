@@ -234,6 +234,8 @@ model TelegramSubscriber {
 
   /// Регионы, о выбросах в которых присылать уведомление
   emissionRegions String[]  @default([])
+  /// Радар рынка (Pro): регионы, о резких движениях цен в которых сообщать
+  radarRegions    String[]  @default([]) @map("radar_regions")
   /// Пользователь заблокировал бота — не шлём, пока снова не нажмёт /start
   blocked         Boolean   @default(false)
   /// Pro действует до этого момента; null или в прошлом — бесплатная версия

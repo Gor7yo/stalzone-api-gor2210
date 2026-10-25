@@ -79,13 +79,14 @@ export class AlertsService {
     const [subscriber, price, flip] = await Promise.all([
       this.prisma.telegramSubscriber.findUnique({
         where: { chatId: BigInt(chatId) },
-        select: { emissionRegions: true, blocked: true },
+        select: { emissionRegions: true, radarRegions: true, blocked: true },
       }),
       this.listPrice(chatId),
       this.listFlip(chatId),
     ]);
     return {
       emission: (subscriber?.emissionRegions ?? []) as Region[],
+      radar: (subscriber?.radarRegions ?? []) as Region[],
       blocked: subscriber?.blocked ?? false,
       price,
       flip,
@@ -209,6 +210,20 @@ export class AlertsService {
     return updated.emissionRegions as Region[];
   }
 
+  /** Радар рынка (Pro): включить или выключить для региона. Выключить можно и без Pro. */
+  async setRadar(user: SubscriberInfo, region: Region, enabled: boolean) {
+    const subscriber = await this.upsertSubscriber(user);
+    if (enabled) await this.pro.requireChat(subscriber.chatId);
+    const regions = new Set(subscriber.radarRegions);
+    if (enabled) regions.add(region);
+    else regions.delete(region);
+    const updated = await this.prisma.telegramSubscriber.update({
+      where: { chatId: subscriber.chatId },
+      data: { radarRegions: [...regions].sort() },
+    });
+    return updated.radarRegions as Region[];
+  }
+
   /** /stop: снять все подписки. */
   async clearAll(chatId: number) {
     await this.prisma.$transaction([
@@ -216,7 +231,7 @@ export class AlertsService {
       this.prisma.flipAlert.deleteMany({ where: { chatId: BigInt(chatId) } }),
       this.prisma.telegramSubscriber.updateMany({
         where: { chatId: BigInt(chatId) },
-        data: { emissionRegions: [] },
+        data: { emissionRegions: [], radarRegions: [] },
       }),
     ]);
   }

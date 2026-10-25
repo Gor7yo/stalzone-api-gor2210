@@ -49,6 +49,21 @@ export interface Flip {
   deals: number;
   perDay: number;
   confidence: Confidence;
+  /** За сколько часов примерно уйдёт по медиане (очередь дешевле + скорость сделок); null — дольше 48 ч */
+  sellHours: number | null;
+  /** Прибыль в час с учётом времени продажи; null — если не продастся за 48 ч */
+  profitPerHour: number | null;
+  /**
+   * Пакетный флип: таких выгодных лотов несколько — сколько из них скупить, чтобы всё ушло
+   * за сутки (lots из total), общий выкуп и прибыль. Один на всю позицию; нет — пакета не набралось.
+   */
+  batch?: {
+    lots: number;
+    total: number;
+    buyout: number;
+    profit: number;
+    sellHours: number;
+  };
   /** Когда лот видели в последнем снимке */
   seenAt: string;
   endTime: string;

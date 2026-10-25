@@ -38,6 +38,7 @@ export class AlertsController {
       return {
         telegram: false,
         emission: [],
+        radar: [],
         blocked: false,
         price: [],
         flip: [],
@@ -82,6 +83,17 @@ export class AlertsController {
       dto.enabled,
     );
     return { emission };
+  }
+
+  /** Радар рынка (Pro): резкие движения цен по ходовым предметам региона. */
+  @Put('radar')
+  async setRadar(@Req() req: AccountRequest, @Body() dto: EmissionToggleDto) {
+    const radar = await this.alerts.setRadar(
+      this.chat(req),
+      dto.region,
+      dto.enabled,
+    );
+    return { radar };
   }
 
   /** Получатель алертов: Telegram аккаунта (с именем, если запрос из мини-приложения). */

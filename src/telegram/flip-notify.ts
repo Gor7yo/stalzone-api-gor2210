@@ -70,23 +70,60 @@ export function flipTitle(f: Flip) {
   return variant ? `${name} · ${variant}` : name;
 }
 
+/** «уйдёт за ~3 ч», «уйдёт меньше чем за час»; null — дольше 48 ч, не пишем */
+export function sellTimeLabel(hours: number | null) {
+  if (hours === null) return null;
+  return hours < 1
+    ? 'уйдёт меньше чем за час'
+    : `уйдёт за ~${Math.round(hours)} ч`;
+}
+
+/** Что стало с лотом из алерта: выкупили или время лота вышло. */
+export type FlipGone = 'sold' | 'expired';
+
+const GONE_LABEL: Record<FlipGone, string> = {
+  sold: '⛔ уже выкупили',
+  expired: '⌛ время лота вышло',
+};
+
+/**
+ * Сообщение флип-алерта. gone — лоты, которых на рынке уже нет (по ключу флипа):
+ * их строка зачёркнута с пометкой, сообщение правится после отправки.
+ */
 export function flipMessage(
   region: Region,
   offers: ReturnType<typeof pickNewFlips>['offers'],
+  gone: ReadonlyMap<string, FlipGone> = new Map(),
 ) {
   const shown = offers.slice(0, FLIPS_PER_MESSAGE);
   const lines = [
     `💰 <b>${offers.length === 1 ? 'Новый флип' : 'Новые флипы'}</b> · ${REGION_LABEL[region] ?? region}`,
     '',
-    ...shown.flatMap(({ flip: f, lots }) => [
-      `<b>${escapeHtml(flipTitle(f))}</b>${lots > 1 ? ` (${lots} лота)` : ''}`,
-      `выкуп ${formatShort(f.unitPrice)} → ~${formatShort(f.sellUnit)}${f.amount > 1 ? ' /шт' : ''} · <b>+${formatShort(f.profit)}</b> (${f.pct.toLocaleString('ru-RU')} %)`,
-      `${CONFIDENCE_LABEL[f.confidence]} · ${f.deals} сделок за ${FLIP_WINDOW_DAYS} дня`,
-      '',
-    ]),
+    ...shown.flatMap(({ flip: f, lots }) => {
+      const title = `<b>${escapeHtml(flipTitle(f))}</b>${lots > 1 ? ` (${lots} лота)` : ''}`;
+      const status = gone.get(f.key);
+      // ушедший лот — одной зачёркнутой строкой, подробности уже не нужны
+      if (status) return [`<s>${title}</s> · ${GONE_LABEL[status]}`, ''];
+      return flipLines(f, title);
+    }),
   ];
   if (offers.length > shown.length) {
     lines.push(`…и ещё ${offers.length - shown.length} — во флиппере`);
   }
   return lines.join('\n').trim();
+}
+
+function flipLines(f: Flip, title: string) {
+  return [
+    title,
+    `выкуп ${formatShort(f.unitPrice)} → ~${formatShort(f.sellUnit)}${f.amount > 1 ? ' /шт' : ''} · <b>+${formatShort(f.profit)}</b> (${f.pct.toLocaleString('ru-RU')} %)`,
+    [
+      CONFIDENCE_LABEL[f.confidence],
+      `${f.deals} сделок за ${FLIP_WINDOW_DAYS} дня`,
+      sellTimeLabel(f.sellHours),
+    ]
+      .filter(Boolean)
+      .join(' · '),
+    '',
+  ];
 }
