@@ -20,6 +20,7 @@ import { REGION_LABEL } from './format';
 import { PRICE_ALERT_LIMIT, ProService, TRIAL_DAYS } from './pro.service';
 import { InlineService } from './inline.service';
 import { RecapService } from './recap.service';
+import { ReviewsService } from './reviews.service';
 import { ReferralService } from './referral.service';
 import { type Category, isCategory } from './support-categories';
 import { isNote, SupportLimitError, SupportService } from './support.service';
@@ -56,6 +57,7 @@ export class BotCommandsService implements OnModuleInit {
     private readonly referrals: ReferralService,
     private readonly inline: InlineService,
     private readonly recap: RecapService,
+    private readonly reviews: ReviewsService,
   ) {}
 
   onModuleInit() {
@@ -357,6 +359,28 @@ export class BotCommandsService implements OnModuleInit {
       return this.supportCallback(q.from, arg, extra, value, edit, answer);
 
     switch (action) {
+      // модерация отзыва: кнопки в карточке, которую получают админы
+      case 'rvw': {
+        if (!this.access.isAdmin(chatId)) return answer();
+        const id = Number(extra);
+        if (!Number.isInteger(id)) return answer();
+        const ok = arg === 'ok';
+        const r = await this.reviews.moderate(id, ok).catch(() => null);
+        if (!r) return answer('Отзыв не найден');
+        const verdict =
+          r.status === 'published' ? '✅ Опубликован' : '❌ Отклонён';
+        // убираем кнопки и дописываем итог, чтобы второй админ видел, что уже решено
+        await this.bot
+          .call('editMessageReplyMarkup', {
+            chat_id: chatId,
+            message_id: edit,
+            reply_markup: {
+              inline_keyboard: [[{ text: verdict, callback_data: 'noop' }]],
+            },
+          })
+          .catch(() => {});
+        return answer(r.changed ? verdict : `Уже решено: ${verdict}`);
+      }
       // кнопка под итогами месяца: сообщение — картинка, его не редактируем, только ответ-подсказка
       case 'recap': {
         const off = arg === 'off';

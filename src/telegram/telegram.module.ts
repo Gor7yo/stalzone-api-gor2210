@@ -23,6 +23,8 @@ import { ProService } from './pro.service';
 import { InlineService } from './inline.service';
 import { MonitorService } from './monitor.service';
 import { RadarService } from './radar.service';
+import { ReviewsController } from './reviews.controller';
+import { ReviewsService } from './reviews.service';
 import { RecapService } from './recap.service';
 import { ReferralService } from './referral.service';
 import { SupportService } from './support.service';
@@ -46,6 +48,7 @@ import { WebLinkService } from './web-link.service';
     ProAdminController,
     TributeController,
     AdminController,
+    ReviewsController,
   ],
   providers: [
     TelegramBotService,
@@ -66,6 +69,7 @@ import { WebLinkService } from './web-link.service';
     MonitorService,
     RecapService,
     RadarService,
+    ReviewsService,
   ],
 })
 export class TelegramModule {}

@@ -109,17 +109,36 @@ export class TributeController {
       return { ok: true };
     }
 
-    // повтор того же вебхука — Pro уже выдан
+    // Запись платежа (ключ — id покупки) и выдача Pro — одной транзакцией:
+    // - повтор вебхука упирается в первичный ключ и отбрасывается (Pro уже выдан);
+    // - повтор, пришедший во время обработки, ждёт на уникальном индексе конца первой
+    //   транзакции: она прошла — отбрасывается, откатилась — выдаёт Pro сам;
+    // - сбой при выдаче откатывает и запись, так что повтор от Tribute не потеряется.
+    let granted: { userId: string | null; until: Date };
     try {
-      const p = hook.payload ?? {};
-      await this.prisma.proPayment.create({
-        data: {
-          id: action.key,
-          chatId: action.chatId,
-          event: hook.name,
-          amount: typeof p.amount === 'number' ? p.amount : null,
-          currency: typeof p.currency === 'string' ? p.currency : null,
-        },
+      granted = await this.prisma.$transaction(async (tx) => {
+        const p = hook.payload ?? {};
+        await tx.proPayment.create({
+          data: {
+            id: action.key,
+            chatId: action.chatId,
+            event: hook.name,
+            amount: typeof p.amount === 'number' ? p.amount : null,
+            currency: typeof p.currency === 'string' ? p.currency : null,
+          },
+        });
+        // Telegram привязан к аккаунту - Pro аккаунту; нет - ждёт на чате до привязки
+        const result =
+          action.kind === 'grant'
+            ? await this.pro.grantChat(action.chatId, action.days, tx)
+            : await this.pro.extendChatTo(action.chatId, action.until, tx);
+        if (result.userId) {
+          await tx.proPayment.update({
+            where: { id: action.key },
+            data: { userId: result.userId },
+          });
+        }
+        return result;
       });
     } catch (e) {
       if (
@@ -129,18 +148,7 @@ export class TributeController {
         return { ok: true, duplicate: true };
       throw e;
     }
-
-    // Telegram привязан к аккаунту - Pro аккаунту; нет - ждёт на чате до привязки
-    const { userId, until } =
-      action.kind === 'grant'
-        ? await this.pro.grantChat(action.chatId, action.days)
-        : await this.pro.extendChatTo(action.chatId, action.until);
-    if (userId) {
-      await this.prisma.proPayment.update({
-        where: { id: action.key },
-        data: { userId },
-      });
-    }
+    const { userId, until } = granted;
     this.logger.log(
       `Tribute ${hook.name}: Pro для ${action.chatId} (аккаунт ${userId ?? 'не привязан'}) до ${until.toISOString()}`,
     );

@@ -281,6 +281,28 @@ model Referral {
 }
 
 /// Обращение в поддержку из бота. В группе поддержки у каждого - своя тема (topicId).
+/// Отзыв о сервисе: один в неделю на Telegram, публикуется после модерации (сайт + канал).
+model Review {
+  id        Int       @id @default(autoincrement())
+  chatId    BigInt
+  userId    String
+  /// Ник, который человек сам указал (проверяется при модерации)
+  nick      String
+  /// 1–5
+  rating    Int
+  text      String
+  /// pending - ждёт модерации, published - опубликован, rejected - отклонён
+  status    String    @default("pending")
+  /// Пост в канале отзывов (REVIEWS_CHANNEL_ID), если опубликован туда
+  channelMessageId Int?
+  createdAt   DateTime  @default(now())
+  moderatedAt DateTime?
+
+  @@index([status, createdAt])
+  @@index([chatId, createdAt])
+  @@map("reviews")
+}
+
 model SupportTicket {
   id       Int     @id @default(autoincrement())
   chatId   BigInt

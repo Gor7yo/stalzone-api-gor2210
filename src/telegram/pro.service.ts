@@ -3,9 +3,13 @@ import {
   ForbiddenException,
   Injectable,
 } from '@nestjs/common';
+import type { Prisma } from 'generated/prisma/client';
 import { PrismaService } from 'src/prisma/prisma.service';
 
 const DAY = 86_400_000;
+
+/** Клиент БД: обычный или транзакции (оплата Tribute — запись платежа и выдача Pro вместе). */
+type Db = Prisma.TransactionClient;
 
 /** Пробный Pro: дней, один раз на аккаунт и на Telegram; без привязанного Telegram не выдаётся. */
 export const TRIAL_DAYS = 3;
@@ -134,36 +138,41 @@ export class ProService {
    * Продлить Pro на days дней (оплата, подарок, ручная выдача).
    * Неистёкший срок продлевается от его конца, истёкший — от сейчас.
    */
-  async grant(userId: string, days: number) {
-    const u = await this.prisma.user.findUniqueOrThrow({
+  async grant(userId: string, days: number, db: Db = this.prisma) {
+    const u = await db.user.findUniqueOrThrow({
       where: { id: userId },
       select: { proUntil: true },
     });
     const from = Math.max(Date.now(), u.proUntil?.getTime() ?? 0);
-    return this.setUntil(userId, new Date(from + days * DAY));
+    return this.setUntil(userId, new Date(from + days * DAY), db);
   }
 
   /** Pro как минимум до until (подписка Tribute сама знает дату окончания). */
-  async extendTo(userId: string, until: Date) {
-    const u = await this.prisma.user.findUniqueOrThrow({
+  async extendTo(userId: string, until: Date, db: Db = this.prisma) {
+    const u = await db.user.findUniqueOrThrow({
       where: { id: userId },
       select: { proUntil: true },
     });
     return this.setUntil(
       userId,
       new Date(Math.max(until.getTime(), u.proUntil?.getTime() ?? 0)),
+      db,
     );
   }
 
   /** Ровно до until (админ); null — снять Pro. */
-  async setUntil<T extends Date | null>(userId: string, until: T): Promise<T> {
-    const u = await this.prisma.user.update({
+  async setUntil<T extends Date | null>(
+    userId: string,
+    until: T,
+    db: Db = this.prisma,
+  ): Promise<T> {
+    const u = await db.user.update({
       where: { id: userId },
       data: { proUntil: until },
       select: { chatId: true, trialUsedAt: true },
     });
     if (u.chatId) {
-      await this.prisma.telegramSubscriber.updateMany({
+      await db.telegramSubscriber.updateMany({
         where: { chatId: u.chatId },
         data: {
           proUntil: until,
@@ -179,26 +188,28 @@ export class ProService {
   /**
    * Продлить Pro владельцу Telegram: аккаунту, если Telegram привязан, иначе
    * самому чату - срок переедет на аккаунт при привязке.
+   * db — транзакция оплаты: Pro выдаётся вместе с записью платежа или не выдаётся вовсе.
    */
-  async grantChat(chatId: bigint, days: number) {
-    const userId = await this.userOfChat(chatId);
-    if (userId) return { userId, until: await this.grant(userId, days) };
-    const current = await this.chat(chatId);
+  async grantChat(chatId: bigint, days: number, db: Db = this.prisma) {
+    const userId = await this.userOfChat(chatId, db);
+    if (userId) return { userId, until: await this.grant(userId, days, db) };
+    const current = await this.chat(chatId, db);
     const from = Math.max(Date.now(), current?.proUntil?.getTime() ?? 0);
     return {
       userId,
-      until: await this.setChat(chatId, new Date(from + days * DAY)),
+      until: await this.setChat(chatId, new Date(from + days * DAY), db),
     };
   }
 
-  async extendChatTo(chatId: bigint, until: Date) {
-    const userId = await this.userOfChat(chatId);
-    if (userId) return { userId, until: await this.extendTo(userId, until) };
-    const current = await this.chat(chatId);
+  async extendChatTo(chatId: bigint, until: Date, db: Db = this.prisma) {
+    const userId = await this.userOfChat(chatId, db);
+    if (userId)
+      return { userId, until: await this.extendTo(userId, until, db) };
+    const current = await this.chat(chatId, db);
     const proUntil = new Date(
       Math.max(until.getTime(), current?.proUntil?.getTime() ?? 0),
     );
-    return { userId, until: await this.setChat(chatId, proUntil) };
+    return { userId, until: await this.setChat(chatId, proUntil, db) };
   }
 
   /** Pro чата (копия аккаунта или ожидающая оплата) - для алертов в боте. */
@@ -211,23 +222,23 @@ export class ProService {
     if (!(await this.chatStatus(chatId)).pro) throw proRequired();
   }
 
-  private async userOfChat(chatId: bigint) {
-    const u = await this.prisma.user.findUnique({
+  private async userOfChat(chatId: bigint, db: Db = this.prisma) {
+    const u = await db.user.findUnique({
       where: { chatId },
       select: { id: true },
     });
     return u?.id ?? null;
   }
 
-  private chat(chatId: bigint) {
-    return this.prisma.telegramSubscriber.findUnique({
+  private chat(chatId: bigint, db: Db = this.prisma) {
+    return db.telegramSubscriber.findUnique({
       where: { chatId },
       select: { proUntil: true, trialUsedAt: true },
     });
   }
 
-  private async setChat(chatId: bigint, proUntil: Date) {
-    await this.prisma.telegramSubscriber.upsert({
+  private async setChat(chatId: bigint, proUntil: Date, db: Db = this.prisma) {
+    await db.telegramSubscriber.upsert({
       where: { chatId },
       create: { chatId, proUntil },
       update: { proUntil },
