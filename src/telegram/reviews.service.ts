@@ -79,13 +79,26 @@ export class ReviewsService {
     };
   }
 
-  /** Можно ли оставить отзыв сейчас и когда следующий. */
+  /**
+   * Можно ли оставить отзыв сейчас, когда следующий и свой отзыв за неделю.
+   * mine автор видит в списке сразу, в любом статусе: о модерации он не знает —
+   * отклонённый просто не видят остальные, а через неделю он пропадает и у автора.
+   */
   async status(account: Account) {
-    if (account.chatId == null) return { telegram: false, nextAt: null };
-    const last = await this.lastAt(account.chatId);
+    if (account.chatId == null)
+      return { telegram: false, nextAt: null, mine: null };
+    const mine = await this.prisma.review.findFirst({
+      where: {
+        chatId: account.chatId,
+        createdAt: { gt: new Date(Date.now() - REVIEW_EVERY_MS) },
+      },
+      orderBy: { createdAt: 'desc' },
+      select: publicSelect,
+    });
     return {
       telegram: true,
-      nextAt: nextReviewAt(last)?.toISOString() ?? null,
+      nextAt: nextReviewAt(mine?.createdAt)?.toISOString() ?? null,
+      mine,
     };
   }
 
@@ -145,7 +158,9 @@ export class ReviewsService {
     if (!review) throw new NotFoundException('Отзыв не найден');
     if (!count) return { changed: false, status: review.status };
 
-    if (ok && this.channel) {
+    // автор о модерации не знает: при отклонении молчим, при публикации — спасибо и ссылка на канал
+    if (!ok) return { changed: true, status: review.status };
+    if (this.channel) {
       const posted = await this.bot
         .call<{ message_id: number }>('sendMessage', {
           chat_id: this.channel,
@@ -162,14 +177,15 @@ export class ReviewsService {
           where: { id },
           data: { channelMessageId: posted.message_id },
         });
+        const link = this.channel.startsWith('@')
+          ? `https://t.me/${this.channel.slice(1)}`
+          : null;
+        await this.bot.send(
+          review.chatId,
+          `⭐ Спасибо за отзыв! Он теперь и в нашем канале${link ? `: ${link}` : '.'}`,
+        );
       }
     }
-    await this.bot.send(
-      review.chatId,
-      ok
-        ? '⭐ Ваш отзыв опубликован - спасибо, что помогаете сделать STALZONE INFO лучше!'
-        : 'Ваш отзыв не прошёл модерацию. Через неделю можно оставить новый.',
-    );
     return { changed: true, status: review.status };
   }
 
