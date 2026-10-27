@@ -1,8 +1,4 @@
-import {
-  collectorProblem,
-  memoryProblem,
-  MonitorService,
-} from './monitor.service';
+import { collectorProblem, MonitorService } from './monitor.service';
 
 jest.mock('src/prisma/prisma.service', () => ({ PrismaService: class {} }));
 jest.mock('src/collector/collector.service', () => ({
@@ -24,16 +20,6 @@ describe('collectorProblem', () => {
   });
   it('лотов нет вообще — тревога', () => {
     expect(collectorProblem(null, now)).not.toBeNull();
-  });
-});
-
-describe('memoryProblem', () => {
-  const MB = 1024 * 1024;
-  it('куча занята меньше 80 % — всё в порядке', () => {
-    expect(memoryProblem(300 * MB, 500 * MB)).toBeNull();
-  });
-  it('80 % и больше — тревога с мегабайтами', () => {
-    expect(memoryProblem(420 * MB, 500 * MB)).toContain('420 из 500 МБ');
   });
 });
 

@@ -5,7 +5,6 @@ import {
   OnModuleDestroy,
 } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
-import { getHeapStatistics } from 'node:v8';
 import { CollectorService } from 'src/collector/collector.service';
 import { PrismaService } from 'src/prisma/prisma.service';
 import { StalcraftApiClient } from 'src/stalzone/api/stalcraft-api.client';
@@ -21,8 +20,6 @@ export const EXBO_FAILURES = 20;
 const EXBO_WINDOW_MS = 5 * MIN;
 /** Утренняя сводка — в 9:00 по Москве (UTC+3). */
 const SUMMARY_HOUR_UTC = 6;
-/** Куча Node занята больше этой доли — тревога: дальше процесс падает и перезапускается. */
-export const HEAP_ALERT_SHARE = 0.8;
 /** Одна и та же разовая тревога (alert) — не чаще раза в 30 минут. */
 export const ALERT_REPEAT_MS = 30 * MIN;
 
@@ -82,7 +79,6 @@ export class MonitorService implements OnApplicationBootstrap, OnModuleDestroy {
       ['db', () => this.checkDb()],
       ['collector', () => this.checkCollector()],
       ['exbo', () => this.checkExbo()],
-      ['memory', () => this.checkMemory()],
     ];
     for (const [name, check] of checks) {
       // база лежит — проверка сборщика (запрос в базу) тоже упадёт: одна тревога вместо двух
@@ -140,13 +136,6 @@ export class MonitorService implements OnApplicationBootstrap, OnModuleDestroy {
         n >= EXBO_FAILURES
           ? `EXBO отвечает ошибками: ${n} за 5 минут. Цены и профили могут не обновляться.`
           : null,
-    });
-  }
-
-  checkMemory(): Promise<CheckResult> {
-    const { used_heap_size, heap_size_limit } = getHeapStatistics();
-    return Promise.resolve({
-      problem: memoryProblem(used_heap_size, heap_size_limit),
     });
   }
 
@@ -226,7 +215,6 @@ const TITLES: Record<string, string> = {
   db: 'База данных',
   collector: 'Сборщик аукциона',
   exbo: 'API EXBO',
-  memory: 'Память сервера',
 };
 
 const dayKey = (d: Date) => d.toISOString().slice(0, 10);
@@ -237,11 +225,4 @@ export function collectorProblem(lastAt: Date | null, now: number) {
   const idle = now - lastAt.getTime();
   if (idle < COLLECTOR_STALE_MS) return null;
   return `Сборщик аукциона ${Math.round(idle / MIN)} мин не обновлял лоты - цены, флиппер и алерты показывают старые данные.`;
-}
-
-/** Проблема памяти по занятой куче и её пределу, байты (чистая функция — для тестов). */
-export function memoryProblem(used: number, limit: number) {
-  if (used / limit < HEAP_ALERT_SHARE) return null;
-  const mb = (b: number) => Math.round(b / 1024 / 1024);
-  return `Занято ${mb(used)} из ${mb(limit)} МБ памяти - скоро сервер упадёт и перезапустится. Похоже на утечку.`;
 }
