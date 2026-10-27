@@ -65,6 +65,7 @@ interface LotRow {
   buyoutPrice: bigint;
   endTime: Date;
   seenAt: Date;
+  firstSeenAt: Date;
 }
 
 /** Ступени заточки — как на фронте (TIERS): +0, +1–4, +5–9, +10–14, +15. */
@@ -118,6 +119,11 @@ export class FlipperService {
     return this.cache.getOrLoad(region, TTL_MS, () => this.compute(region));
   }
 
+  /** Сборщик только что освежил лоты региона - следующий запрос посчитает ленту заново. */
+  forget(region: string) {
+    this.cache.delete(region);
+  }
+
   /** Медианы за штуку: по точной заточке (bucket = 0–15) и по ступени (bucket = 100 + ступень). */
   private prices(region: string) {
     return this.pricesCache.getOrLoad(region, PRICES_TTL_MS, async () => {
@@ -165,7 +171,7 @@ export class FlipperService {
     // лоты с выкупом из последнего снимка сборщика и быстрых проверок новых лотов
     const lots = await this.prisma.$queryRaw<LotRow[]>`
       SELECT l."itemId", l."quality", l."upgrade", l."variant", l."amount", l."buyoutPrice",
-             l."endTime", l."lastSeenAt" AS "seenAt"
+             l."endTime", l."lastSeenAt" AS "seenAt", l."firstSeenAt"
       FROM "auction_lots" l
       JOIN "tracked_items" t ON t."region" = l."region" AND t."itemId" = l."itemId"
       WHERE l."region" = ${region} AND l."goneAt" IS NULL AND l."buyoutPrice" > 0
@@ -242,6 +248,7 @@ export class FlipperService {
         sellHours: timing.hours,
         profitPerHour: timing.perHour,
         seenAt: iso(lot.seenAt),
+        firstSeenAt: iso(lot.firstSeenAt),
         endTime: iso(lot.endTime),
         lastSale: iso(p.last),
       };

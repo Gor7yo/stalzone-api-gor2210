@@ -21,6 +21,11 @@ export class TtlCache<T> {
     this.store.clear();
   }
 
+  /** Забыть одну запись (данные под ней обновились). */
+  delete(key: string) {
+    this.store.delete(key);
+  }
+
   async getOrLoad(
     key: string,
     ttlMs: number,

@@ -11,6 +11,7 @@ import {
 import { Type } from 'class-transformer';
 import { IsIn, IsInt, IsOptional, Matches, Max, Min } from 'class-validator';
 import { REGIONS, type Region } from 'src/api/dto/queries.dto';
+import { CollectorService } from 'src/collector/collector.service';
 import { ServerGuard } from 'src/common/guards/server.guard';
 import { FlipperService } from 'src/flipper/flipper.service';
 import { SaleTimingService } from 'src/flipper/sale-timing.service';
@@ -77,13 +78,24 @@ export class FlipsController {
   constructor(
     private readonly pro: ProService,
     private readonly flipper: FlipperService,
+    private readonly collector: CollectorService,
   ) {}
 
+  /**
+   * Лента + проверка по запросу: открытая лента раз в минуту освежает лоты региона у сборщика,
+   * после чего лента пересчитывается. Без кеша браузера: страница опрашивает ленту сама.
+   */
   @Get()
-  @Header('Cache-Control', 'private, max-age=30')
+  @Header('Cache-Control', 'private, no-store')
   async flips(@Req() req: AccountRequest, @Query() query: FlipsQueryDto) {
     await this.pro.require(req.account.userId);
-    return this.flipper.feed(query.region);
+    const { region } = query;
+    void this.collector
+      .refreshForViewers(region)
+      .then((changed) => changed && this.flipper.forget(region))
+      .catch(() => {});
+    const feed = await this.flipper.feed(region);
+    return { ...feed, refresh: this.collector.viewRefreshState(region) };
   }
 }
 

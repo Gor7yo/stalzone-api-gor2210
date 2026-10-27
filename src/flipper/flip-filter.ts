@@ -66,6 +66,8 @@ export interface Flip {
   };
   /** Когда лот видели в последнем снимке */
   seenAt: string;
+  /** Когда сборщик впервые увидел лот - для пометки «новый» на ленте; нет у старых данных */
+  firstSeenAt?: string;
   endTime: string;
   lastSale: string;
 }

@@ -53,18 +53,31 @@ const TICK_MS = 1_000;
 const CONCURRENCY = 12;
 /**
  * Быстрая проверка новых лотов (сортировка «сначала свежие»): интервал по тому, как часто
- * у предмета случаются флипы. Места 1–10 — раз в 15 с, 11–35 — раз в 30 с, 36–60 — раз в 90 с,
+ * у предмета случаются флипы. Места 1–10 — раз в 25 с, 11–35 — раз в 40 с, 36–60 — раз в 100 с,
  * остальные — только полным снимком. Пересчёт — раз в час (prune).
- * Бюджет: ~40 + 50 + 17 ≈ 107 запросов/мин; вместе с полными снимками и продажами
+ * Бюджет: ~24 + 38 + 15 ≈ 77 запросов/мин; вместе с полными снимками и продажами
  * (~45/мин) — в пределах квоты сборщика (~170 запросов/мин). Шире не делать: быстрые
  * проверки берутся первыми и при перерасходе вытеснят снимки и продажи.
  */
 const FRESH_TIERS = [
-  { top: 10, sec: 15 },
-  { top: 35, sec: 30 },
-  { top: 60, sec: 90 },
+  { top: 10, sec: 25 },
+  { top: 35, sec: 40 },
+  { top: 60, sec: 100 },
 ];
-const FRESH_REST_SEC = 90;
+const FRESH_REST_SEC = 100;
+/** Быстрая проверка (флиппер) - только в этих регионах; остальные - полными снимками. */
+const FRESH_REGIONS = new Set<string>(['ru']);
+/**
+ * Проверка по запросу: кто-то открыл ленту флиппера региона - освежаем лоты самых флиповых
+ * предметов, не чаще раза в минуту на регион (сколько бы людей ни смотрело). В RU добирает
+ * то, что фоновая проверка не трогала дольше минуты, в остальных регионах - основной источник свежести.
+ */
+const VIEW_REFRESH_MS = MIN;
+/** Сколько предметов за раз: ~40 токенов EXBO в минуту, пока ленту смотрят. */
+const VIEW_REFRESH_ITEMS = 20;
+const VIEW_REFRESH_CONCURRENCY = 4;
+/** Снимок старше - вместо одной страницы свежих лотов делаем полный (лента берёт снимки до 3 ч). */
+const VIEW_FULL_AFTER_MS = 2 * 60 * MIN;
 /** Если новые лоты проверяются быстро, полный снимок (все страницы) — раз в 5 минут. */
 const FULL_WITH_FRESH_MS = 5 * MIN;
 /** Бронь задачи на время выполнения: если процесс упадёт, через 2 мин её возьмут снова. */
@@ -167,6 +180,13 @@ export class CollectorService
   private readonly backfilling = new Set<string>();
   /** идущие запросы снимков: сборщик и пользователь не запрашивают один предмет дважды */
   private readonly inflight = new Map<string, Promise<void>>();
+  /** «регион:предмет» → когда последний раз сняли его лоты (полным снимком или быстрой проверкой) */
+  private readonly checkedAt = new Map<string, number>();
+  /** проверка по запросу ленты флиппера: регион → когда начали и закончили (null - ещё идёт) */
+  private readonly viewRefreshes = new Map<
+    string,
+    { startedAt: number; doneAt: number | null }
+  >();
   /** счётчики для /api/collector/status */
   private readonly stats = {
     startedAt: new Date(),
@@ -177,6 +197,8 @@ export class CollectorService
     salesJobs: 0,
     backfillJobs: 0,
     userRefreshes: 0,
+    /** предметов освежено проверками по запросу ленты флиппера */
+    viewRefreshes: 0,
     newSales: 0,
     skippedNoBudget: 0,
     errors: 0,
@@ -301,9 +323,15 @@ export class CollectorService
       .map((i) => ({ ...i, score: byKey.get(keyOf(i)) ?? 0 }))
       .sort((a, b) => b.score - a.score || b.salesPerDay - a.salesPerDay);
     let changed = 0;
-    for (const [rank, i] of ranked.entries()) {
-      const tier = FRESH_TIERS.find((t) => rank < t.top);
+    // места считаются только среди регионов флиппера: остальным быстрая проверка не положена
+    let rank = 0;
+    let fast = 0;
+    for (const i of ranked) {
+      const inRegion = FRESH_REGIONS.has(i.region);
+      const tier = inRegion ? FRESH_TIERS.find((t) => rank < t.top) : undefined;
+      if (inRegion) rank++;
       const sec = i.score > 0 && tier ? tier.sec : null;
+      if (sec === FRESH_TIERS[0].sec) fast++;
       if (sec === i.freshEverySec && i.score === i.flipScore) continue;
       changed++;
       await this.prisma.trackedItem.update({
@@ -311,9 +339,6 @@ export class CollectorService
         data: { freshEverySec: sec, flipScore: i.score },
       });
     }
-    const fast = ranked.filter(
-      (i, r) => i.score > 0 && r < FRESH_TIERS[0].top,
-    ).length;
     if (changed)
       this.logger.log(
         `Быстрая проверка лотов: ${fast} предметов раз в ${FRESH_TIERS[0].sec} с, обновлено ${changed}`,
@@ -401,6 +426,84 @@ export class CollectorService
       this.stats.userRefreshes++;
       await this.collectSales(await this.ensure(region, itemId), priority);
     });
+  }
+
+  /**
+   * Ленту флиппера региона открыли: освежить лоты самых флиповых предметов (VIEW_REFRESH_*).
+   * Не чаще раза в минуту на регион; квоты нет - остаток пропускаем до следующего раза.
+   * true - хоть один предмет обновился (ленту стоит пересчитать).
+   */
+  async refreshForViewers(region: string): Promise<boolean> {
+    if (!this.enabled || !this.regions.includes(region as Region)) return false;
+    const started = Date.now();
+    const last = this.viewRefreshes.get(region);
+    if (last && started - last.startedAt < VIEW_REFRESH_MS) return false;
+    // отметку ставим до первого await - параллельные запросы ленты второй раз не запустят
+    const state = { startedAt: started, doneAt: null as number | null };
+    this.viewRefreshes.set(region, state);
+    try {
+      const items = await this.prisma.trackedItem.findMany({
+        where: { region, flipScore: { gt: 0 } },
+        orderBy: [{ flipScore: 'desc' }, { salesPerDay: 'desc' }],
+        take: VIEW_REFRESH_ITEMS * 2,
+      });
+      const queue = items
+        .filter(
+          (i) =>
+            started - (this.checkedAt.get(keyOf(i)) ?? 0) >= VIEW_REFRESH_MS,
+        )
+        .slice(0, VIEW_REFRESH_ITEMS);
+      let done = 0;
+      let noBudget = false;
+      const worker = async () => {
+        for (
+          let item = queue.shift();
+          item && !noBudget;
+          item = queue.shift()
+        ) {
+          const full =
+            !item.lastLotsAt ||
+            started - item.lastLotsAt.getTime() > VIEW_FULL_AFTER_MS;
+          const kind = full ? 'lots' : 'fresh';
+          const it = item;
+          try {
+            await this.once(`${kind}:${keyOf(it)}`, () =>
+              full
+                ? this.collectLots(it, 'background')
+                : this.collectFresh(it, 'background'),
+            );
+            done++;
+          } catch (error) {
+            if (error instanceof BudgetExhaustedError) {
+              this.stats.skippedNoBudget++;
+              noBudget = true;
+            } else {
+              this.stats.errors++;
+              this.logger.warn(
+                `проверка по запросу ${keyOf(it)}: ${String(error)}`,
+              );
+            }
+          }
+        }
+      };
+      await Promise.all(
+        Array.from({ length: VIEW_REFRESH_CONCURRENCY }, worker),
+      );
+      this.stats.viewRefreshes += done;
+      return done > 0;
+    } finally {
+      state.doneAt = Date.now();
+    }
+  }
+
+  /** Как идёт проверка по запросу в регионе: для подписи «обновляем рынок…» на ленте. */
+  viewRefreshState(region: string) {
+    const s = this.viewRefreshes.get(region);
+    if (!s) return null;
+    return {
+      startedAt: new Date(s.startedAt).toISOString(),
+      doneAt: s.doneAt ? new Date(s.doneAt).toISOString() : null,
+    };
   }
 
   private once(key: string, job: () => Promise<void>) {
@@ -725,7 +828,10 @@ export class CollectorService
    * Заодно отмечает ушедшими лоты, которые выставлены позже самого старого из страницы,
    * но в ней уже нет (их выкупили). Полный снимок (collectLots) — реже, он видит весь рынок.
    */
-  private async collectFresh(item: TrackedItem) {
+  private async collectFresh(
+    item: TrackedItem,
+    priority: Priority = 'background',
+  ) {
     const res = await this.stalcraft.get<AuctionItemLotsResponse>(
       [item.region, 'auction', item.itemId, 'lots'],
       {
@@ -736,7 +842,7 @@ export class CollectorService
         order: 'desc',
       },
       0,
-      'background',
+      priority,
     );
     this.stats.freshJobs++;
     const now = new Date();
@@ -781,6 +887,7 @@ export class CollectorService
         },
       }),
     ]);
+    this.checkedAt.set(keyOf(item), now.getTime());
   }
 
   private async collectLots(item: TrackedItem, priority: Priority) {
@@ -896,6 +1003,7 @@ export class CollectorService
         },
       }),
     ]);
+    this.checkedAt.set(keyOf(item), now.getTime());
   }
 
   /** Состояние для /api/collector/status. */
