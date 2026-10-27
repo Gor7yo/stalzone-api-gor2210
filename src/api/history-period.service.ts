@@ -88,6 +88,11 @@ async function inPool<T, R>(
 
 /** Устаревший ответ ещё столько отдаём мгновенно, обновляя его в фоне. */
 const STALE_MS = 6 * 60 * 60_000;
+/**
+ * Сколько ответов держим в памяти. Один ответ - до ~15 страниц по 200 сделок (мегабайт и больше),
+ * при прежней 1000 записей кеш съедал всю память сервера и процесс падал.
+ */
+const MAX_ENTRIES = 100;
 /** Для предмета, о котором ещё ничего не знаем: первая страница + столько «на всякий случай». */
 const SPECULATIVE_PAGES = 2;
 const ORDER: HistoryPeriod[] = ['day', 'week', 'month', 'year'];
@@ -220,10 +225,14 @@ export class HistoryPeriodService {
     if (pending) return pending;
     const promise = this.load(q)
       .then((value) => {
+        const now = Date.now();
+        // протухшие (старше STALE_MS) уже никому не отдадим - выкидываем
+        for (const [k, e] of this.entries)
+          if (now - e.at >= STALE_MS) this.entries.delete(k);
         this.entries.delete(key);
-        this.entries.set(key, { value, at: Date.now() });
+        this.entries.set(key, { value, at: now });
         // вытесняем самые старые записи
-        if (this.entries.size > 1000) dropOldest(this.entries);
+        while (this.entries.size > MAX_ENTRIES) dropOldest(this.entries);
         return value;
       })
       .finally(() => this.inflight.delete(key));

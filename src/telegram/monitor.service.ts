@@ -20,6 +20,8 @@ export const EXBO_FAILURES = 20;
 const EXBO_WINDOW_MS = 5 * MIN;
 /** Утренняя сводка — в 9:00 по Москве (UTC+3). */
 const SUMMARY_HOUR_UTC = 6;
+/** Расход памяти пишем в лог (без уведомлений) раз в столько - видно, растёт ли он. */
+const MEMORY_LOG_EVERY_MS = 10 * MIN;
 /** Одна и та же разовая тревога (alert) — не чаще раза в 30 минут. */
 export const ALERT_REPEAT_MS = 30 * MIN;
 
@@ -44,6 +46,7 @@ export class MonitorService implements OnApplicationBootstrap, OnModuleDestroy {
   /** разовые тревоги: ключ → когда отправили и сколько таких пропустили с тех пор */
   private readonly alerted = new Map<string, { at: number; skipped: number }>();
   private lastSummaryDay = '';
+  private memoryLoggedAt = 0;
 
   constructor(
     private readonly prisma: PrismaService,
@@ -87,6 +90,10 @@ export class MonitorService implements OnApplicationBootstrap, OnModuleDestroy {
         problem: `проверка упала: ${e.message}`,
       }));
       await this.transition(name, problem);
+    }
+    if (Date.now() - this.memoryLoggedAt >= MEMORY_LOG_EVERY_MS) {
+      this.memoryLoggedAt = Date.now();
+      this.logMemory();
     }
     const now = new Date();
     if (this.summaryDue(now) && this.lastSummaryDay !== dayKey(now)) {
@@ -137,6 +144,15 @@ export class MonitorService implements OnApplicationBootstrap, OnModuleDestroy {
           ? `EXBO отвечает ошибками: ${n} за 5 минут. Цены и профили могут не обновляться.`
           : null,
     });
+  }
+
+  /** rss растёт, а куча нет - течёт вне JS (буферы, нативные модули); растёт куча - наши объекты. */
+  private logMemory() {
+    const m = process.memoryUsage();
+    const mb = (b: number) => Math.round(b / 1024 / 1024);
+    this.logger.log(
+      `Память: rss ${mb(m.rss)} МБ, куча ${mb(m.heapUsed)}/${mb(m.heapTotal)} МБ, вне кучи ${mb(m.external)} МБ (буферы ${mb(m.arrayBuffers)} МБ), кеш EXBO ${this.stalcraft.cacheSize} записей`,
+    );
   }
 
   private summaryDue(now: Date) {
