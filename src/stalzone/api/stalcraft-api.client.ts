@@ -38,7 +38,8 @@ export class UserTokenRevokedError extends Error {
 @Injectable()
 export class StalcraftApiClient {
   private readonly logger = new Logger(StalcraftApiClient.name);
-  private readonly cache = new TtlCache<unknown>(3000);
+  /** ответы крупные (страница лотов/истории - сотни КБ в памяти), поэтому записей немного */
+  private readonly cache = new TtlCache<unknown>(400);
   private readonly baseUrl: string;
   /** Общая квота STALCRAFT API на всё приложение (люди + сборщик). */
   readonly budget: TokenBudget;

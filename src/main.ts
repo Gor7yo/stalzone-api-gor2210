@@ -9,6 +9,14 @@ import { AppModule } from './app.module';
 import { corsOrigins } from './config/validation';
 import { HttpExceptionFilter } from './http-exception.filter';
 
+// ошибка в фоновой задаче без catch не должна ронять весь сервер (по умолчанию Node завершается)
+process.on('unhandledRejection', (reason) => {
+  Logger.error(
+    `Необработанная ошибка: ${reason instanceof Error ? (reason.stack ?? reason.message) : String(reason)}`,
+    'Process',
+  );
+});
+
 async function bootstrap() {
   const app = await NestFactory.create<NestExpressApplication>(AppModule, {
     // req.rawBody — для проверки подписи вебхука Tribute
