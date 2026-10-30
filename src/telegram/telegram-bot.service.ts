@@ -19,7 +19,10 @@ const isGone = (e: unknown) =>
   (e.code === 403 || /chat not found/i.test(e.message));
 
 export type InlineButton = { text: string; style?: string } & (
-  { url: string } | { callback_data: string }
+  | { url: string }
+  | { callback_data: string }
+  /** нажал - текст в буфере обмена (Bot API 7.11) */
+  | { copy_text: { text: string } }
 );
 
 export interface TgMessage {

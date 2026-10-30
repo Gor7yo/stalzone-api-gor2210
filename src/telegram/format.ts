@@ -76,6 +76,23 @@ export function alertTitle(a: {
   return variant ? `${name} · ${variant}` : name;
 }
 
+/**
+ * Страница предмета на сайте сразу с качеством и заточкой лота (как itemHref во фронтенде):
+ * у модуля вместо заточки - ключевая характеристика, у предмета с качеством заточка всегда в ссылке.
+ */
+export function lotUrl(
+  site: string,
+  lot: { itemId: string; quality: number; upgrade: number; variant?: string },
+) {
+  const params = new URLSearchParams();
+  if (lot.quality >= 0) params.set('q', String(lot.quality));
+  if (lot.variant) params.set('v', lot.variant);
+  else if (lot.upgrade > 0 || lot.quality >= 0)
+    params.set('u', String(lot.upgrade));
+  const query = params.toString();
+  return `${site}/auction/${encodeURIComponent(lot.itemId)}${query ? `?${query}` : ''}`;
+}
+
 /** Диплинк t.me/<bot>/<app>?startapp=<путь в base64url> — формат как во фронтенде (lib/telegram.ts). */
 export function deepLink(appUrl: string | undefined, path: string) {
   if (!appUrl) return undefined;

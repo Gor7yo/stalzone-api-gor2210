@@ -1,5 +1,13 @@
 import type { Flip, FlipFilter } from '../flipper/flip-filter';
-import { flipMessage, flipTitle, pickNewFlips } from './flip-notify';
+import { formatPrice, lotUrl } from './format';
+import {
+  flipButtons,
+  flipMessage,
+  flipTitle,
+  goneLabel,
+  pickNewFlips,
+} from './flip-notify';
+import { priceMessage } from './price-match';
 
 const NOW = Date.parse('2026-10-11T18:00:00Z');
 
@@ -84,6 +92,81 @@ describe('pickNewFlips', () => {
     expect(offers[0]).toMatchObject({ lots: 2, flip: { profit: 775_000 } });
     expect(keys).toHaveLength(2);
   });
+
+  it('об ушедших по базе лотах не пишет, но запоминает их; живой лот той же позиции - вместо ушедшего', () => {
+    const goneBest = flip({ buyout: 3_500_000, profit: 775_000 });
+    const alive = flip({ buyout: 3_700_000, profit: 575_000 });
+    const onlyGone = flip({ itemId: 'x' });
+    const { offers, keys } = pickNewFlips(
+      [goneBest, alive, onlyGone],
+      filter,
+      new Set(),
+      NOW,
+      new Set([goneBest.key, onlyGone.key]),
+    );
+    expect(offers).toHaveLength(1);
+    expect(offers[0]).toMatchObject({ lots: 1, flip: { profit: 575_000 } });
+    expect(keys).toHaveLength(3);
+  });
+});
+
+describe('кнопки и ссылки', () => {
+  it('ссылка на предмет - с качеством и заточкой, у модуля - с характеристикой', () => {
+    const site = 'https://stalzone-info.ru';
+    expect(lotUrl(site, flip())).toBe(`${site}/auction/4lrn?q=3&u=15`);
+    expect(
+      lotUrl(site, {
+        itemId: 'm',
+        quality: 1,
+        upgrade: 0,
+        variant: 'marksman',
+      }),
+    ).toBe(`${site}/auction/m?q=1&v=marksman`);
+    expect(lotUrl(site, { itemId: 'c', quality: -1, upgrade: 0 })).toBe(
+      `${site}/auction/c`,
+    );
+  });
+
+  it('на каждый живой лот - «скопировать название» и сайт; у ушедшего кнопок нет', () => {
+    const a = flip({ itemId: 'a', name: 'Жар-птица', quality: 2 });
+    const b = flip({ itemId: 'b', name: 'Висмут' });
+    const offers = [
+      { flip: a, lots: 1 },
+      { flip: b, lots: 1 },
+    ];
+    const rows = flipButtons('https://s', 'ru', offers);
+    expect(rows).toHaveLength(3);
+    // копируется только название - его вставляют в поиск аукциона в игре
+    expect(rows[0][0]).toEqual({
+      text: '📋 Жар-птица',
+      copy_text: { text: 'Жар-птица' },
+    });
+    expect(rows[0][1]).toEqual({
+      text: '🌐 Особый +15',
+      url: 'https://s/auction/a?q=2&u=15',
+    });
+    expect(rows[2]).toEqual([
+      { text: 'Открыть флиппер', url: 'https://s/flips' },
+      { text: 'Отключить', callback_data: 'fdel:ru' },
+    ]);
+
+    const afterSale = flipButtons(
+      'https://s',
+      'ru',
+      offers,
+      new Map([[a.key, 'sold']]),
+    );
+    expect(afterSale).toHaveLength(2);
+    expect(afterSale[0][0]).toMatchObject({ copy_text: { text: 'Висмут' } });
+  });
+
+  it('один лот - кнопки словами', () => {
+    const [row] = flipButtons('https://s', 'ru', [{ flip: flip(), lots: 1 }]);
+    expect(row.map((b) => b.text)).toEqual([
+      '📋 Скопировать название',
+      '🌐 На сайте',
+    ]);
+  });
 });
 
 describe('flipMessage', () => {
@@ -114,7 +197,7 @@ describe('flipMessage', () => {
     expect(text).toContain('уйдёт за ~3 ч');
   });
 
-  it('ушедший лот — зачёркнут с пометкой, остальные как были', () => {
+  it('ушедший лот — зачёркнут с пометкой и ценой, остальные как были', () => {
     const sold = flip({ itemId: 'a' });
     const alive = flip({ itemId: 'b' });
     const text = flipMessage(
@@ -126,9 +209,49 @@ describe('flipMessage', () => {
       new Map([[sold.key, 'sold']]),
     );
     expect(text).toContain(
-      '<s><b>Висмут · Редкий +15</b></s> · ⛔ уже выкупили',
+      '<s><b>Висмут · Редкий +15</b></s> · ⛔ выкупили за <b>3,5кк</b>',
     );
     // подробная строка «выкуп … → …» осталась только у живого лота
     expect(text.match(/выкуп /g)).toHaveLength(1);
+  });
+
+  it('пачка и истёкший лот: цена за штуку и «выкуп был»', () => {
+    const lot = { buyout: 120_000, unitPrice: 6_000, amount: 20 };
+    expect(goneLabel('sold', lot)).toBe('⛔ выкупили за <b>120к</b> (6к/шт)');
+    expect(goneLabel('expired', lot)).toBe(
+      '⌛ время лота вышло, выкуп был <b>120к</b> (6к/шт)',
+    );
+  });
+
+  it('«5 лотов», а не «5 лота»', () => {
+    expect(flipMessage('ru', [{ flip: flip(), lots: 5 }])).toContain(
+      '(5 лотов)',
+    );
+    expect(flipMessage('ru', [{ flip: flip(), lots: 3 }])).toContain(
+      '(3 лота)',
+    );
+  });
+});
+
+describe('priceMessage', () => {
+  it('выкупленный лот: название зачёркнуто, цена осталась', () => {
+    const lot = { amount: 1, buyoutPrice: 1_200_000 };
+    expect(priceMessage('Комета · Редкий +10', 'RU', 1_500_000, lot)).toBe(
+      [
+        '🔔 <b>Комета · Редкий +10</b> · RU',
+        'Лот за <b>1,2кк</b> - порог 1,5кк',
+        `Выкуп ${formatPrice(1_200_000)}`,
+      ].join('\n'),
+    );
+    const sold = priceMessage(
+      'Комета · Редкий +10',
+      'RU',
+      1_500_000,
+      lot,
+      'sold',
+    );
+    expect(sold).toContain('🔔 <s>Комета · Редкий +10</s> · RU');
+    expect(sold).toContain('⛔ Выкупили за <b>1,2кк</b> (порог 1,5кк)');
+    expect(sold).toContain(`Выкуп ${formatPrice(1_200_000)}`);
   });
 });

@@ -16,22 +16,23 @@ import {
 } from 'src/flipper/flipper.service';
 import { PrismaService } from 'src/prisma/prisma.service';
 import { StalcraftApiClient } from 'src/stalzone/api/stalcraft-api.client';
-import {
-  alertTitle,
-  deepLink,
-  escapeHtml,
-  formatPrice,
-  formatShort,
-  REGION_LABEL,
-} from './format';
+import { alertTitle, deepLink, lotUrl, REGION_LABEL } from './format';
 import { MAX_SENT_KEYS } from './alerts.service';
 import {
   FLIPS_PER_MESSAGE,
+  flipButtons,
   flipMessage,
+  newFlips,
   pickNewFlips,
   type FlipGone,
 } from './flip-notify';
-import { decide, unitPrice } from './price-match';
+import {
+  decide,
+  lotKey,
+  priceMessage,
+  qualityOf,
+  upgradeOf,
+} from './price-match';
 import { isProActive, PRICE_ALERT_LIMIT } from './pro.service';
 import { InlineButton, TelegramBotService } from './telegram-bot.service';
 
@@ -47,19 +48,48 @@ const PRICES_EVERY_MS = 60_000;
 const FLIPS_EVERY_MS = 15_000;
 /** Не чаще одного сообщения о флипах на человека за столько (остальное придёт следующим). */
 const FLIP_MESSAGE_GAP_MS = 5 * 60_000;
-/** Отправленные флип-алерты правим («уже выкупили») столько времени после отправки. */
-const FLIP_TRACK_MS = 2 * 60 * 60_000;
+/** Отправленные алерты о лотах правим («выкупили за …») столько времени после отправки. */
+const TRACK_MS = 2 * 60 * 60_000;
+/** Сверка с базой сборщика - пачками по столько лотов в одном запросе. */
+const GONE_BATCH = 200;
 
-/** Отправленный флип-алерт: чтобы зачеркнуть лоты, которых уже нет на рынке. */
-interface SentFlips {
+/** Лот из алерта для сверки с базой сборщика: у EXBO нет id - узнаём по цене и времени окончания. */
+interface LotRef {
+  key: string;
+  itemId: string;
+  amount: number;
+  buyout: number;
+  endTime: string;
+}
+
+/**
+ * Отправленное сообщение о лотах (флип-алерт или алерт по цене): когда лот уходит с рынка,
+ * правим это же сообщение - нового уведомления не шлём. render собирает текст и кнопки заново.
+ */
+interface Tracked {
   chatId: bigint;
   messageId: number;
   region: Region;
-  offers: ReturnType<typeof pickNewFlips>['offers'];
-  buttons: InlineButton[][];
+  lots: LotRef[];
   gone: Map<string, FlipGone>;
+  render: (gone: ReadonlyMap<string, FlipGone>) => {
+    text: string;
+    buttons: InlineButton[][];
+  };
   at: number;
 }
+
+const flipRef = (f: Flip): LotRef => ({
+  key: f.key,
+  itemId: f.itemId,
+  amount: f.amount,
+  buyout: f.buyout,
+  endTime: f.endTime,
+});
+
+/** Ключ сверки: в ключе флипа время без миллисекунд, в базе - с ними. */
+const refId = (itemId: string, amount: number, buyout: number, end: number) =>
+  `${itemId}|${amount}|${buyout}|${Math.floor(end / 1000)}`;
 /** Снимок лотов старше этого — сначала обновляем (сборщик снимает предметы с алертами раз в минуту). */
 const LOTS_MAX_AGE_MS = 90_000;
 /** О выбросе, начавшемся раньше, не сообщаем (например, сервер только что запустился). */
@@ -85,7 +115,7 @@ export class AlertsWatcher implements OnApplicationBootstrap, OnModuleDestroy {
   private readonly running = new Set<string>();
   private readonly appUrl?: string;
   /** в памяти: после перезапуска старые сообщения просто перестают обновляться */
-  private sentFlips: SentFlips[] = [];
+  private tracked: Tracked[] = [];
 
   constructor(
     private readonly prisma: PrismaService,
@@ -108,6 +138,11 @@ export class AlertsWatcher implements OnApplicationBootstrap, OnModuleDestroy {
 
   onModuleDestroy() {
     this.timers.forEach(clearInterval);
+  }
+
+  /** Ссылка из кнопки: в мини-приложение, если оно настроено (TELEGRAM_APP_URL), иначе на сайт. */
+  private link(path: string) {
+    return deepLink(this.appUrl, path) ?? `${this.bot.siteUrl}${path}`;
   }
 
   /** Запуск по таймеру без наложений: следующая проверка не стартует, пока идёт предыдущая. */
@@ -162,12 +197,12 @@ export class AlertsWatcher implements OnApplicationBootstrap, OnModuleDestroy {
         s.emissionRegions.includes(region),
       );
       this.logger.log(`Выброс ${region}: уведомляем ${recipients.length} чел.`);
-      const link = deepLink(this.appUrl, '/emission');
+      const link = this.link('/emission');
       for (const { chatId } of recipients) {
         await this.bot.send(
           chatId,
           `☢️ <b>Выброс начался</b> · ${REGION_LABEL[region]}\nСкорее в укрытие!`,
-          link ? [[{ text: 'Открыть таймер', url: link }]] : [],
+          [[{ text: 'Открыть таймер', url: link }]],
         );
         await sleep(SEND_GAP_MS);
       }
@@ -197,6 +232,10 @@ export class AlertsWatcher implements OnApplicationBootstrap, OnModuleDestroy {
       ),
     );
 
+    const site = this.bot.siteUrl;
+    const flipper = this.link('/flips');
+    // ушёл ли лот - один раз за проверку: один лот подходит под алерты многих людей
+    const goneKnown = new Map<string, boolean>();
     for (const alert of alerts) {
       const feed = feeds.get(alert.region);
       if (!feed) continue;
@@ -206,109 +245,169 @@ export class AlertsWatcher implements OnApplicationBootstrap, OnModuleDestroy {
       ) {
         continue;
       }
+      const region = alert.region as Region;
+      const filter = {
+        minProfit: alert.minProfit,
+        minPct: alert.minPct,
+        minConfidence: alert.minConfidence as Confidence,
+        maxBudget: alert.maxBudget,
+        groups: alert.groups,
+      };
+      const sent = new Set(alert.sentKeys);
+      const now = Date.now();
+      const candidates = newFlips(feed.flips, filter, sent, now);
+      if (!candidates.length) continue;
+
+      // лента бывает старше базы сборщика: о лоте, который там уже ушёл, не пишем вовсе -
+      // иначе приходит уведомление, а в сообщении сразу «выкупили»
+      const unknown = candidates.filter(
+        (f) => !goneKnown.has(`${region}|${f.key}`),
+      );
+      const states = await this.goneLots(region, unknown.map(flipRef), now);
+      for (const f of unknown)
+        goneKnown.set(`${region}|${f.key}`, states.has(f.key));
+      const gone = new Set(
+        candidates
+          .filter((f) => goneKnown.get(`${region}|${f.key}`))
+          .map((f) => f.key),
+      );
+
       const { keys, offers } = pickNewFlips(
         feed.flips,
-        {
-          minProfit: alert.minProfit,
-          minPct: alert.minPct,
-          minConfidence: alert.minConfidence as Confidence,
-          maxBudget: alert.maxBudget,
-          groups: alert.groups,
-        },
-        new Set(alert.sentKeys),
+        filter,
+        sent,
+        now,
+        gone,
       );
-      if (!offers.length) continue;
+      const remember = [...keys, ...alert.sentKeys].slice(0, MAX_SENT_KEYS);
+      if (!offers.length) {
+        // все новые уже ушли: запоминаем, чтобы не сверять снова, но молчим
+        await this.prisma.flipAlert.updateMany({
+          where: { id: alert.id },
+          data: { sentKeys: remember },
+        });
+        continue;
+      }
 
-      const link = deepLink(this.appUrl, '/flips');
-      const buttons: InlineButton[][] = [
-        [
-          ...(link ? [{ text: 'Открыть флиппер', url: link }] : []),
-          { text: 'Отключить', callback_data: `fdel:${alert.region}` },
-        ],
-      ];
+      const render = (g: ReadonlyMap<string, FlipGone>) => ({
+        text: flipMessage(region, offers, g),
+        buttons: flipButtons(site, region, offers, g, flipper),
+      });
+      const first = render(new Map());
       const messageId = await this.bot.sendWithId(
         alert.chatId,
-        flipMessage(alert.region as Region, offers),
-        buttons,
+        first.text,
+        first.buttons,
       );
       if (messageId !== null) {
-        this.sentFlips.push({
+        this.tracked.push({
           chatId: alert.chatId,
           messageId,
-          region: alert.region as Region,
-          offers,
-          buttons,
+          region,
+          lots: offers
+            .slice(0, FLIPS_PER_MESSAGE)
+            .map(({ flip }) => flipRef(flip)),
           gone: new Map(),
+          render,
           at: Date.now(),
         });
         await this.prisma.flipAlert.updateMany({
           where: { id: alert.id },
-          data: {
-            sentKeys: [...keys, ...alert.sentKeys].slice(0, MAX_SENT_KEYS),
-            lastNotifiedAt: new Date(),
-          },
+          data: { sentKeys: remember, lastNotifiedAt: new Date() },
         });
       }
       await sleep(SEND_GAP_MS);
     }
-    await this.markGoneFlips();
+    await this.markGone();
   }
 
   /**
-   * Отправленные за 2 часа флип-алерты: лоты, которых уже нет на рынке, зачёркиваем
-   * («уже выкупили» / «время лота вышло»), чтобы не бежать за ушедшим. Сверяемся с базой сборщика.
+   * Отправленные за 2 часа алерты о лотах (флипы и цены): ушедший с рынка лот зачёркиваем
+   * в том же сообщении с ценой («выкупили за …» / «время лота вышло»). Новых сообщений
+   * об этом не шлём - правка в Telegram приходит без уведомления.
    */
-  private async markGoneFlips() {
+  private async markGone() {
     const now = Date.now();
-    this.sentFlips = this.sentFlips.filter((s) => now - s.at < FLIP_TRACK_MS);
-    for (const s of this.sentFlips) {
+    this.tracked = this.tracked.filter((s) => now - s.at < TRACK_MS);
+    // одним запросом на регион, сколько бы сообщений ни ждало
+    const byRegion = new Map<Region, Map<string, LotRef>>();
+    for (const s of this.tracked) {
+      const refs = byRegion.get(s.region) ?? new Map<string, LotRef>();
+      for (const l of s.lots) if (!s.gone.has(l.key)) refs.set(l.key, l);
+      byRegion.set(s.region, refs);
+    }
+    const states = new Map<string, FlipGone>();
+    for (const [region, refs] of byRegion) {
+      for (const [k, v] of await this.goneLots(region, [...refs.values()], now))
+        states.set(`${region}|${k}`, v);
+    }
+
+    for (const s of this.tracked) {
       let changed = false;
-      for (const { flip: f } of s.offers.slice(0, FLIPS_PER_MESSAGE)) {
-        if (s.gone.has(f.key)) continue;
-        const status = await this.lotStatus(s.region, f, now);
-        if (status) {
-          s.gone.set(f.key, status);
+      for (const l of s.lots) {
+        const status = states.get(`${s.region}|${l.key}`);
+        if (status && !s.gone.has(l.key)) {
+          s.gone.set(l.key, status);
           changed = true;
         }
       }
       if (!changed) continue;
-      await this.bot.editText(
-        s.chatId,
-        s.messageId,
-        flipMessage(s.region, s.offers, s.gone),
-        s.buttons,
-      );
+      const { text, buttons } = s.render(s.gone);
+      await this.bot.editText(s.chatId, s.messageId, text, buttons);
       await sleep(SEND_GAP_MS);
     }
     // всё зачёркнуто — больше не следим
-    this.sentFlips = this.sentFlips.filter(
-      (s) => s.gone.size < Math.min(s.offers.length, FLIPS_PER_MESSAGE),
-    );
+    this.tracked = this.tracked.filter((s) => s.gone.size < s.lots.length);
   }
 
-  /** Лот флипа ушёл с рынка? sold — пропал до конца срока, expired — срок вышел; null — ещё висит. */
-  private async lotStatus(
+  /**
+   * Какие из лотов ушли с рынка (по базе сборщика): sold — пропал до конца срока,
+   * expired — срок вышел. Лотов, которые ещё висят, в ответе нет.
+   */
+  private async goneLots(
     region: Region,
-    f: Flip,
+    refs: LotRef[],
     now: number,
-  ): Promise<FlipGone | null> {
-    const end = new Date(f.endTime);
-    const lot = await this.prisma.auctionLot.findFirst({
-      where: {
-        region,
-        itemId: f.itemId,
-        quality: f.quality,
-        upgrade: f.upgrade,
-        variant: f.variant ?? '',
-        amount: f.amount,
-        buyoutPrice: BigInt(f.buyout),
-        // в ключе флипа время без миллисекунд
-        endTime: { gte: end, lt: new Date(end.getTime() + 1000) },
-      },
-      select: { goneAt: true },
-    });
-    if (lot?.goneAt) return lot.goneAt < end ? 'sold' : 'expired';
-    return now >= end.getTime() ? 'expired' : null;
+  ): Promise<Map<string, FlipGone>> {
+    const out = new Map<string, FlipGone>();
+    for (let i = 0; i < refs.length; i += GONE_BATCH) {
+      const batch = refs.slice(i, i + GONE_BATCH);
+      const rows = await this.prisma.auctionLot.findMany({
+        where: {
+          region,
+          goneAt: { not: null },
+          OR: batch.map((r) => {
+            const end = Math.floor(Date.parse(r.endTime) / 1000) * 1000;
+            return {
+              itemId: r.itemId,
+              amount: r.amount,
+              buyoutPrice: BigInt(r.buyout),
+              endTime: { gte: new Date(end), lt: new Date(end + 1000) },
+            };
+          }),
+        },
+        select: {
+          itemId: true,
+          amount: true,
+          buyoutPrice: true,
+          endTime: true,
+          goneAt: true,
+        },
+      });
+      const gone = new Map(
+        rows.map((l) => [
+          refId(l.itemId, l.amount, Number(l.buyoutPrice), l.endTime.getTime()),
+          l.goneAt,
+        ]),
+      );
+      for (const r of batch) {
+        const end = Date.parse(r.endTime);
+        const goneAt = gone.get(refId(r.itemId, r.amount, r.buyout, end));
+        if (goneAt) out.set(r.key, goneAt.getTime() < end ? 'sold' : 'expired');
+        else if (now >= end) out.set(r.key, 'expired');
+      }
+    }
+    return out;
   }
 
   // ---------- цены ----------
@@ -363,31 +462,60 @@ export class AlertsWatcher implements OnApplicationBootstrap, OnModuleDestroy {
         }
 
         const { lot } = result;
-        const price = unitPrice(lot);
-        const lines = [
-          `🔔 <b>${escapeHtml(alertTitle(alert))}</b> · ${REGION_LABEL[region as Region] ?? region}`,
-          `Лот за <b>${formatShort(price)}</b>${lot.amount > 1 ? ' / шт.' : ''} — порог ${formatShort(alert.maxPrice)}`,
-          lot.amount > 1
-            ? `${lot.amount} шт. · выкуп ${formatPrice(lot.buyoutPrice)}`
-            : `Выкуп ${formatPrice(lot.buyoutPrice)}`,
-        ];
-        const link = deepLink(
-          this.appUrl,
-          `/auction/${itemId}${alert.variant ? `?v=${alert.variant}` : ''}`,
-        );
+        const title = alertTitle(alert);
+        const regionLabel = REGION_LABEL[region as Region] ?? region;
+        // страница предмета сразу с качеством и заточкой этого лота
         const buttons: InlineButton[][] = [
           [
-            ...(link ? [{ text: 'Открыть предмет', url: link }] : []),
-            { text: 'Удалить алерт', callback_data: `del:${alert.id}` },
+            {
+              text: '📋 Скопировать название',
+              copy_text: { text: alert.itemName },
+            },
+            {
+              text: '🌐 На сайте',
+              url: lotUrl(this.bot.siteUrl, {
+                itemId,
+                quality: qualityOf(lot) ?? -1,
+                upgrade: upgradeOf(lot),
+                variant: alert.variant || undefined,
+              }),
+            },
           ],
+          [{ text: 'Удалить алерт', callback_data: `del:${alert.id}` }],
         ];
 
-        const sent = await this.bot.send(
+        const messageId = await this.bot.sendWithId(
           alert.chatId,
-          lines.join('\n'),
+          priceMessage(title, regionLabel, alert.maxPrice, lot),
           buttons,
         );
-        if (sent) {
+        if (messageId !== null) {
+          // лот выкупят - поправим это сообщение, а не пришлём новое
+          const ref: LotRef = {
+            key: lotKey(lot),
+            itemId,
+            amount: lot.amount,
+            buyout: lot.buyoutPrice,
+            endTime: lot.endTime,
+          };
+          this.tracked.push({
+            chatId: alert.chatId,
+            messageId,
+            region: region as Region,
+            lots: [ref],
+            gone: new Map(),
+            render: (g) => ({
+              text: priceMessage(
+                title,
+                regionLabel,
+                alert.maxPrice,
+                lot,
+                g.get(ref.key),
+              ),
+              buttons,
+            }),
+            at: Date.now(),
+          });
           await this.prisma.priceAlert.updateMany({
             where: { id: alert.id },
             data: { lastLotKey: result.key, lastNotifiedAt: new Date() },
