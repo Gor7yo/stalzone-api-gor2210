@@ -509,6 +509,34 @@ model MarketItemActivity {
   @@map("market_item_activity")
 }
 
+/// Журнал флипов: лот однажды попал в ленту флиппера. Для витрины бесплатной версии -
+/// сколько флипов нашли за сутки и примеры уже ушедших. Храним 3 дня (FlipperService).
+model FlipLog {
+  region     String
+  /// ключ лота (Flip.key): предмет, цена, время окончания
+  key        String
+  itemId     String
+  /// -1 — без качества
+  quality    Int
+  upgrade    Int
+  variant    String   @default("")
+  amount     Int
+  buyout     BigInt
+  sellUnit   BigInt
+  profit     BigInt
+  pct        Float
+  /// high / medium / low
+  confidence String
+  deals      Int
+  endTime    DateTime
+  /// когда сборщик впервые увидел лот
+  seenAt     DateTime
+
+  @@id([region, key])
+  @@index([region, seenAt])
+  @@map("flip_log")
+}
+
 /// Предмет, который сборщик держит свежим. Частота зависит от ликвидности и интереса пользователей.
 model TrackedItem {
   region String

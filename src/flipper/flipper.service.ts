@@ -1,4 +1,4 @@
-import { Injectable } from '@nestjs/common';
+import { Injectable, Logger } from '@nestjs/common';
 import { TtlCache } from 'src/common/cache/ttl-cache';
 import { ITEM_INFO } from 'src/collector/item-info';
 import { PrismaService } from 'src/prisma/prisma.service';
@@ -30,6 +30,11 @@ const MAX_SNAPSHOT_AGE = 3 * 60 * MIN;
 const TTL_MS = 15_000;
 /** Медианы по сделкам за окно меняются медленно — их пересчитываем раз в 10 минут. */
 const PRICES_TTL_MS = 10 * MIN;
+/** Журнал флипов (витрина бесплатной версии) храним 3 дня, чистим раз в час. */
+const LOG_KEEP_MS = 3 * DAY;
+const LOG_CLEAN_EVERY_MS = 60 * MIN;
+/** Сколько ключей уже записанных лотов помним, чтобы не слать их в БД каждые 15 с. */
+const LOGGED_KEYS_MAX = 5_000;
 
 export * from './flip-filter';
 
@@ -110,8 +115,12 @@ const iso = (d: Date) => new Date(d).toISOString().replace(/\.\d{3}Z$/, 'Z');
  */
 @Injectable()
 export class FlipperService {
+  private readonly logger = new Logger(FlipperService.name);
   private readonly cache = new TtlCache<FlipFeed>(10);
   private readonly pricesCache = new TtlCache<Map<string, PriceRow>>(10);
+  /** регион → ключи лотов, уже записанных в журнал (после перезапуска повтор отсекает БД) */
+  private readonly logged = new Map<string, Set<string>>();
+  private loggedCleanAt = 0;
 
   constructor(private readonly prisma: PrismaService) {}
 
@@ -272,6 +281,10 @@ export class FlipperService {
       if (batch) for (const i of items) i.flip.batch = batch;
     }
     flips.sort((a, b) => b.profit - a.profit);
+    // в журнал - фоном: лента от него не зависит
+    void this.log(region, flips).catch((e) =>
+      this.logger.warn(`Журнал флипов: ${(e as Error).message}`),
+    );
 
     return {
       region,
@@ -279,5 +292,43 @@ export class FlipperService {
       windowDays: WINDOW_DAYS,
       flips,
     };
+  }
+
+  /** Новые лоты ленты - в журнал флипов (витрина бесплатной версии); старше 3 дней - прочь. */
+  private async log(region: string, flips: Flip[]) {
+    const seen = this.logged.get(region) ?? new Set<string>();
+    this.logged.set(region, seen);
+    const fresh = flips.filter((f) => !seen.has(f.key));
+    if (fresh.length) {
+      await this.prisma.flipLog.createMany({
+        data: fresh.map((f) => ({
+          region,
+          key: f.key,
+          itemId: f.itemId,
+          quality: f.quality,
+          upgrade: f.upgrade,
+          variant: f.variant ?? '',
+          amount: f.amount,
+          buyout: BigInt(f.buyout),
+          sellUnit: BigInt(f.sellUnit),
+          profit: BigInt(f.profit),
+          pct: f.pct,
+          confidence: f.confidence,
+          deals: f.deals,
+          endTime: new Date(f.endTime),
+          seenAt: new Date(f.firstSeenAt ?? f.seenAt),
+        })),
+        skipDuplicates: true,
+      });
+      // память не копим: забытый ключ при следующей записи отсечёт первичный ключ в БД
+      if (seen.size + fresh.length > LOGGED_KEYS_MAX) seen.clear();
+      for (const f of fresh) seen.add(f.key);
+    }
+    if (Date.now() - this.loggedCleanAt > LOG_CLEAN_EVERY_MS) {
+      this.loggedCleanAt = Date.now();
+      await this.prisma.flipLog.deleteMany({
+        where: { seenAt: { lt: new Date(Date.now() - LOG_KEEP_MS) } },
+      });
+    }
   }
 }
