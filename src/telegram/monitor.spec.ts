@@ -1,6 +1,14 @@
-import { collectorProblem, MonitorService } from './monitor.service';
+import {
+  alertsProblem,
+  collectorProblem,
+  MonitorService,
+} from './monitor.service';
 
 jest.mock('src/prisma/prisma.service', () => ({ PrismaService: class {} }));
+jest.mock('./alerts.watcher', () => ({
+  AlertsWatcher: class {},
+  PRICE_LAG_MS: 5 * 60_000,
+}));
 jest.mock('src/collector/collector.service', () => ({
   CollectorService: class {},
 }));
@@ -23,10 +31,24 @@ describe('collectorProblem', () => {
   });
 });
 
+describe('alertsProblem', () => {
+  it('все предметы проверены вовремя — всё в порядке', () => {
+    expect(
+      alertsProblem({ items: 40, lagging: 0, maxLagMs: 2 * MIN }),
+    ).toBeNull();
+  });
+  it('часть опаздывает — сколько из скольких и самый давний', () => {
+    const p = alertsProblem({ items: 300, lagging: 120, maxLagMs: 12 * MIN });
+    expect(p).toContain('120 из 300');
+    expect(p).toContain('12 мин');
+  });
+});
+
 describe('MonitorService: тревога только при смене состояния', () => {
   function setup() {
     const sent: string[] = [];
     let failures = 0;
+    let lagging = 0;
     const monitor = new MonitorService(
       { $queryRaw: jest.fn().mockResolvedValue([{ at: new Date() }]) } as never,
       {
@@ -39,13 +61,40 @@ describe('MonitorService: тревога только при смене сост
       { adminIds: ['1'] } as never,
       { enabled: true } as never,
       { failuresSince: () => failures } as never,
+      {
+        priceStatus: () => ({
+          items: 50,
+          lagging,
+          maxLagMs: lagging ? 9 * MIN : MIN,
+        }),
+      } as never,
       { get: () => undefined } as never,
     );
     const tick = () => (monitor as unknown as { tick(): Promise<void> }).tick();
     // в jest NODE_ENV=test — мониторинг выключен; разовые тревоги проверяем как на проде
     (monitor as unknown as { enabled: boolean }).enabled = true;
-    return { sent, tick, monitor, setFailures: (n: number) => (failures = n) };
+    return {
+      sent,
+      tick,
+      monitor,
+      setFailures: (n: number) => (failures = n),
+      setLagging: (n: number) => (lagging = n),
+    };
   }
+
+  it('алерты по цене: одна тревога за всё опоздание и одно «снова работает»', async () => {
+    const { sent, tick, setLagging } = setup();
+    setLagging(30);
+    await tick();
+    await tick();
+    expect(sent.filter((s) => s.includes('Алерты по цене'))).toHaveLength(1);
+    expect(sent[0]).toContain('30 из 50');
+    setLagging(0);
+    await tick();
+    expect(
+      sent.filter((s) => s.startsWith('✅') && s.includes('Алерты')),
+    ).toHaveLength(1);
+  });
 
   it('разовая тревога: повтор за 30 минут не шлём, а считаем', async () => {
     jest.useFakeTimers({ now: new Date('2026-10-22T03:00:00Z') });

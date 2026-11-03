@@ -90,6 +90,8 @@ const flipRef = (f: Flip): LotRef => ({
 /** Ключ сверки: в ключе флипа время без миллисекунд, в базе - с ними. */
 const refId = (itemId: string, amount: number, buyout: number, end: number) =>
   `${itemId}|${amount}|${buyout}|${Math.floor(end / 1000)}`;
+/** Предмет под алертом по цене не проверялся дольше — алерт опаздывает (тревога в мониторинге). */
+export const PRICE_LAG_MS = 5 * 60_000;
 /** Снимок лотов старше этого — сначала обновляем (сборщик снимает предметы с алертами раз в минуту). */
 const LOTS_MAX_AGE_MS = 90_000;
 /** О выбросе, начавшемся раньше, не сообщаем (например, сервер только что запустился). */
@@ -116,6 +118,8 @@ export class AlertsWatcher implements OnApplicationBootstrap, OnModuleDestroy {
   private readonly appUrl?: string;
   /** в памяти: после перезапуска старые сообщения просто перестают обновляться */
   private tracked: Tracked[] = [];
+  /** «регион:предмет» под алертами по цене → когда последний раз удалось проверить лоты */
+  private readonly priceChecked = new Map<string, number>();
 
   constructor(
     private readonly prisma: PrismaService,
@@ -412,6 +416,21 @@ export class AlertsWatcher implements OnApplicationBootstrap, OnModuleDestroy {
 
   // ---------- цены ----------
 
+  /**
+   * Для мониторинга: сколько разных предметов под алертами по цене и сколько из них
+   * не удаётся проверить дольше PRICE_LAG_MS (обычно - не хватает квоты EXBO).
+   */
+  priceStatus(now = Date.now()) {
+    let lagging = 0;
+    let maxLagMs = 0;
+    for (const at of this.priceChecked.values()) {
+      const lag = now - at;
+      if (lag > PRICE_LAG_MS) lagging++;
+      maxLagMs = Math.max(maxLagMs, lag);
+    }
+    return { items: this.priceChecked.size, lagging, maxLagMs };
+  }
+
   async checkPrices() {
     const all = await this.prisma.priceAlert.findMany({
       where: { subscriber: { blocked: false, ...notBanned() } },
@@ -439,16 +458,23 @@ export class AlertsWatcher implements OnApplicationBootstrap, OnModuleDestroy {
         itemId: a.itemId,
       })),
     );
+    // опоздания: новый предмет считаем «проверенным» с момента появления, ушедшие забываем
+    const now = Date.now();
+    for (const key of groups.keys())
+      if (!this.priceChecked.has(key)) this.priceChecked.set(key, now);
+    for (const key of this.priceChecked.keys())
+      if (!groups.has(key)) this.priceChecked.delete(key);
 
-    for (const group of groups.values()) {
+    for (const [key, group] of groups) {
       const { region, itemId } = group[0];
       const ceiling = Math.max(...group.map((a) => a.maxPrice));
       let lots: AuctionItemLotsResponse['lots'];
       try {
         lots = await this.lotsUpTo(region, itemId, ceiling);
       } catch {
-        continue; // EXBO недоступен — попробуем в следующую минуту
+        continue; // EXBO недоступен или квоты нет — попробуем в следующую минуту
       }
+      this.priceChecked.set(key, Date.now());
 
       for (const alert of group) {
         const result = decide(lots, alert);
@@ -531,6 +557,8 @@ export class AlertsWatcher implements OnApplicationBootstrap, OnModuleDestroy {
    * Первые 200 — из снимка сборщика в БД. Лоты без выкупа (0) EXBO ставит в начало,
    * а нужное качество может быть глубже первых 200 лотов — поэтому, если снимок
    * неполный и порог выше его последнего лота, дочитываем страницы EXBO (всего не больше 5).
+   * В EXBO - с фоновым приоритетом: резерв квоты остаётся посетителям сайта. Квоты нет -
+   * BudgetExhaustedError, проверка этого предмета ждёт следующей минуты (видно в priceStatus).
    */
   private async lotsUpTo(region: string, itemId: string, ceiling: number) {
     const PAGE = 200;
@@ -554,6 +582,7 @@ export class AlertsWatcher implements OnApplicationBootstrap, OnModuleDestroy {
           order: 'asc',
         },
         20_000,
+        'background',
       );
       lots.push(...res.lots);
       const last = res.lots.at(-1);

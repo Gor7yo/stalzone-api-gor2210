@@ -9,6 +9,7 @@ import { CollectorService } from 'src/collector/collector.service';
 import { PrismaService } from 'src/prisma/prisma.service';
 import { StalcraftApiClient } from 'src/stalzone/api/stalcraft-api.client';
 import { AccessService } from './access.service';
+import { AlertsWatcher, PRICE_LAG_MS } from './alerts.watcher';
 import { TelegramBotService } from './telegram-bot.service';
 
 const MIN = 60_000;
@@ -54,6 +55,7 @@ export class MonitorService implements OnApplicationBootstrap, OnModuleDestroy {
     private readonly access: AccessService,
     private readonly collector: CollectorService,
     private readonly stalcraft: StalcraftApiClient,
+    private readonly watcher: AlertsWatcher,
     config: ConfigService,
   ) {
     this.enabled =
@@ -82,6 +84,7 @@ export class MonitorService implements OnApplicationBootstrap, OnModuleDestroy {
       ['db', () => this.checkDb()],
       ['collector', () => this.checkCollector()],
       ['exbo', () => this.checkExbo()],
+      ['alerts', () => this.checkAlerts()],
     ];
     for (const [name, check] of checks) {
       // база лежит — проверка сборщика (запрос в базу) тоже упадёт: одна тревога вместо двух
@@ -146,12 +149,24 @@ export class MonitorService implements OnApplicationBootstrap, OnModuleDestroy {
     });
   }
 
+  /** Алерты по цене не успевают проверяться (обычно - не хватает квоты EXBO). */
+  checkAlerts(): Promise<CheckResult> {
+    return Promise.resolve({
+      problem: alertsProblem(this.watcher.priceStatus()),
+    });
+  }
+
   /** rss растёт, а куча нет - течёт вне JS (буферы, нативные модули); растёт куча - наши объекты. */
   private logMemory() {
     const m = process.memoryUsage();
     const mb = (b: number) => Math.round(b / 1024 / 1024);
+    const a = this.watcher.priceStatus();
     this.logger.log(
       `Память: rss ${mb(m.rss)} МБ, куча ${mb(m.heapUsed)}/${mb(m.heapTotal)} МБ, вне кучи ${mb(m.external)} МБ (буферы ${mb(m.arrayBuffers)} МБ), кеш EXBO ${this.stalcraft.cacheSize} записей`,
+    );
+    // рядом с памятью - нагрузка алертов: видно, когда предметов под алертами становится много
+    this.logger.log(
+      `Алерты по цене: ${a.items} предметов, опаздывают ${a.lagging}, самый давний ${Math.round(a.maxLagMs / MIN)} мин`,
     );
   }
 
@@ -231,9 +246,20 @@ const TITLES: Record<string, string> = {
   db: 'База данных',
   collector: 'Сборщик аукциона',
   exbo: 'API EXBO',
+  alerts: 'Алерты по цене',
 };
 
 const dayKey = (d: Date) => d.toISOString().slice(0, 10);
+
+/** Проблема алертов по цене: есть предметы, которые не удаётся проверить дольше PRICE_LAG_MS. */
+export function alertsProblem(s: {
+  items: number;
+  lagging: number;
+  maxLagMs: number;
+}) {
+  if (!s.lagging) return null;
+  return `Опаздывают: ${s.lagging} из ${s.items} предметов под алертами не проверялись дольше ${Math.round(PRICE_LAG_MS / MIN)} мин (самый давний - ${Math.round(s.maxLagMs / MIN)} мин). Скорее всего, не хватает квоты EXBO: алерты приходят с задержкой, сайт при этом работает.`;
+}
 
 /** Проблема сборщика по времени последнего снимка (чистая функция — для тестов). */
 export function collectorProblem(lastAt: Date | null, now: number) {
